@@ -47,6 +47,8 @@ def test_infer_shots_detects_direction_change() -> None:
 def test_rally_and_match_aggregation() -> None:
     track = _make_track()
     rally = rally_from_track(track, rally_id=1)
+    crop = rally.metadata.get("focus_crop_norm", {})
+    assert {"x", "y", "w", "h"}.issubset(set(crop.keys()))
     timeline = aggregate_match(
         video_path="/tmp/demo.mp4",
         fps=30.0,

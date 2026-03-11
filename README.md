@@ -62,7 +62,11 @@ squashvid analyze \
   --output analysis.json \
   --max-rallies 24 \
   --segment-frame-step 2 \
-  --tracking-frame-step 4
+  --tracking-frame-step 4 \
+  --cv-workers 10 \
+  --max-video-minutes 12 \
+  --player-a-name "Aditya" \
+  --player-b-name "Opponent"
 ```
 
 If `OPENAI_API_KEY` is available, the app calls OpenAI Responses API for coaching insight. Otherwise it returns a local heuristic insight report.
@@ -95,6 +99,19 @@ squashvid-api
 
 Then open the UI at: `http://localhost:8000/`
 
+UI includes a **Rally Review Scrubber**:
+- scrubber/video sits directly under rally filters in the Rally Timeline section
+- click any rally card to load that rally
+- video view is cropped to the inferred rally focus area
+- shot markers appear on the scrubber timeline and are clickable
+- selected rally panel shows full shot-by-shot details
+- rally grid supports sorting by match order, longest, shortest, or most shots
+- rally picker lets you jump directly to a specific rally number
+- filters include winner, rally-length range, and shot-count range
+- player names are configurable (A/B labels become custom names across UI + insights)
+- coaching insights are rendered as visual cards for patterns, drills, and full written report sections
+- advanced controls include CV worker-process count and “analyze first X minutes”
+
 Analyze by file path:
 
 ```bash
@@ -115,10 +132,20 @@ curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
   -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"youtube_cache_dir":"/absolute/path/to/cache","motion_threshold":0.018,"min_rally_sec":4.0,"idle_gap_sec":1.2,"max_rallies":30,"segment_frame_step":2,"tracking_frame_step":4}'
 
+# with CPU-parallel CV and first-N-minutes window
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"cv_workers":10,"max_video_minutes":12}'
+
 # with per-request API key override
 curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
   -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"openai_api_key":"sk-..."}'
+
+# with player naming
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"player_a_name":"Aditya","player_b_name":"Opponent"}'
 ```
 
 Analyze by upload:

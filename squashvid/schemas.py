@@ -63,6 +63,7 @@ class CoachingInsight(BaseModel):
 class AnalysisResult(BaseModel):
     timeline: MatchTimeline
     insight: CoachingInsight | None = None
+    source_video_url: str | None = None
 
 
 class AnalyzeRequest(BaseModel):
@@ -70,12 +71,16 @@ class AnalyzeRequest(BaseModel):
     include_llm: bool = True
     llm_model: str = "gpt-4.1-mini"
     openai_api_key: str | None = None
+    player_a_name: str = "Player A"
+    player_b_name: str = "Player B"
     motion_threshold: float = Field(default=0.018, ge=0.001, le=0.5)
     min_rally_sec: float = Field(default=4.0, ge=1.0, le=120.0)
     idle_gap_sec: float = Field(default=1.2, ge=0.1, le=15.0)
     max_rallies: int | None = Field(default=None, ge=1)
     segment_frame_step: int = Field(default=2, ge=1, le=12)
     tracking_frame_step: int = Field(default=4, ge=1, le=12)
+    cv_workers: int | None = Field(default=None, ge=1, le=128)
+    max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None
 
 
@@ -83,10 +88,14 @@ class AnalyzeOptions(BaseModel):
     include_llm: bool = True
     llm_model: str = "gpt-4.1-mini"
     openai_api_key: str | None = None
+    player_a_name: str = "Player A"
+    player_b_name: str = "Player B"
     motion_threshold: float = Field(default=0.018, ge=0.001, le=0.5)
     min_rally_sec: float = Field(default=4.0, ge=1.0, le=120.0)
     idle_gap_sec: float = Field(default=1.2, ge=0.1, le=15.0)
     max_rallies: int | None = Field(default=None, ge=1)
     segment_frame_step: int = Field(default=2, ge=1, le=12)
     tracking_frame_step: int = Field(default=4, ge=1, le=12)
+    cv_workers: int | None = Field(default=None, ge=1, le=128)
+    max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None

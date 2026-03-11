@@ -12,12 +12,16 @@ def _analyze(args: argparse.Namespace) -> int:
     options = AnalyzeOptions(
         include_llm=not args.no_llm,
         llm_model=args.llm_model,
+        player_a_name=args.player_a_name,
+        player_b_name=args.player_b_name,
         motion_threshold=args.motion_threshold,
         min_rally_sec=args.min_rally_sec,
         idle_gap_sec=args.idle_gap_sec,
         max_rallies=args.max_rallies,
         segment_frame_step=args.segment_frame_step,
         tracking_frame_step=args.tracking_frame_step,
+        cv_workers=args.cv_workers,
+        max_video_minutes=args.max_video_minutes,
         youtube_cache_dir=args.youtube_cache_dir,
     )
 
@@ -65,6 +69,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model used by OpenAI Responses API",
     )
     analyze_parser.add_argument(
+        "--player-a-name",
+        default="Player A",
+        help="Display name for player label A",
+    )
+    analyze_parser.add_argument(
+        "--player-b-name",
+        default="Player B",
+        help="Display name for player label B",
+    )
+    analyze_parser.add_argument(
         "--motion-threshold",
         type=float,
         default=0.018,
@@ -99,6 +113,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=4,
         help="Frame stride for tracking pass (higher is faster)",
+    )
+    analyze_parser.add_argument(
+        "--cv-workers",
+        type=int,
+        default=None,
+        help="Worker processes for per-rally CV tracking (default: auto up to CPU cores)",
+    )
+    analyze_parser.add_argument(
+        "--max-video-minutes",
+        type=float,
+        default=None,
+        help="Analyze only the first X minutes of the video",
     )
     analyze_parser.add_argument(
         "--youtube-cache-dir",

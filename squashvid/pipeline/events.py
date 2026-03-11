@@ -205,9 +205,90 @@ def _infer_outcome(track: SegmentTrack, shots: list[ShotEvent]) -> str:
     return f"{opponent} forced error"
 
 
+def _focus_crop_metadata(track: SegmentTrack) -> dict[str, float]:
+    frame_w, frame_h = track.frame_size
+    if frame_w <= 0 or frame_h <= 0:
+        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+
+    points: list[tuple[float, float]] = []
+    for obs in track.observations:
+        for label in ("A", "B"):
+            pos = obs.player_positions.get(label)
+            if pos is not None:
+                points.append(pos)
+        if obs.ball_position is not None:
+            points.append(obs.ball_position)
+
+    if len(points) < 3:
+        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    min_x = min(xs)
+    max_x = max(xs)
+    min_y = min(ys)
+    max_y = max(ys)
+
+    pad_x = 0.12 * frame_w
+    pad_y = 0.14 * frame_h
+
+    x1 = max(0.0, min_x - pad_x)
+    y1 = max(0.0, min_y - pad_y)
+    x2 = min(float(frame_w), max_x + pad_x)
+    y2 = min(float(frame_h), max_y + pad_y)
+
+    min_w = 0.42 * frame_w
+    min_h = 0.55 * frame_h
+
+    current_w = x2 - x1
+    current_h = y2 - y1
+    if current_w < min_w:
+        center_x = (x1 + x2) / 2.0
+        x1 = center_x - (min_w / 2.0)
+        x2 = center_x + (min_w / 2.0)
+    if current_h < min_h:
+        center_y = (y1 + y2) / 2.0
+        y1 = center_y - (min_h / 2.0)
+        y2 = center_y + (min_h / 2.0)
+
+    if x1 < 0:
+        x2 -= x1
+        x1 = 0.0
+    if y1 < 0:
+        y2 -= y1
+        y1 = 0.0
+    if x2 > frame_w:
+        x1 -= (x2 - frame_w)
+        x2 = float(frame_w)
+    if y2 > frame_h:
+        y1 -= (y2 - frame_h)
+        y2 = float(frame_h)
+
+    x1 = max(0.0, x1)
+    y1 = max(0.0, y1)
+    x2 = min(float(frame_w), x2)
+    y2 = min(float(frame_h), y2)
+
+    if x2 <= x1 or y2 <= y1:
+        return {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+
+    norm_x = x1 / frame_w
+    norm_y = y1 / frame_h
+    norm_w = (x2 - x1) / frame_w
+    norm_h = (y2 - y1) / frame_h
+
+    return {
+        "x": round(float(norm_x), 5),
+        "y": round(float(norm_y), 5),
+        "w": round(float(norm_w), 5),
+        "h": round(float(norm_h), 5),
+    }
+
+
 def rally_from_track(track: SegmentTrack, rally_id: int) -> RallySummary:
     shots = infer_shots(track)
     positions = _compute_t_metrics(track, shots)
+    focus_crop = _focus_crop_metadata(track)
     avg_motion = (
         mean(obs.motion_ratio for obs in track.observations) if track.observations else 0.0
     )
@@ -224,6 +305,7 @@ def rally_from_track(track: SegmentTrack, rally_id: int) -> RallySummary:
             "avg_motion": round(float(avg_motion), 5),
             "shot_count": len(shots),
             "frame_samples": len(track.observations),
+            "focus_crop_norm": focus_crop,
         },
     )
 

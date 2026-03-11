@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
+from typing import Any
 
 from squashvid.schemas import CoachingInsight, MatchTimeline
 
@@ -73,6 +75,19 @@ def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
     )
 
 
+def _replace_player_tokens(text: str, player_a_name: str, player_b_name: str) -> str:
+    out = str(text)
+    out = out.replace("Player A", player_a_name)
+    out = out.replace("Player B", player_b_name)
+    out = out.replace(" A ", f" {player_a_name} ")
+    out = out.replace(" B ", f" {player_b_name} ")
+    out = out.replace("A avg", f"{player_a_name} avg")
+    out = out.replace("B avg", f"{player_b_name} avg")
+    out = out.replace("A T", f"{player_a_name} T")
+    out = out.replace("B T", f"{player_b_name} T")
+    return out
+
+
 def _extract_json_block(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
@@ -81,21 +96,110 @@ def _extract_json_block(text: str) -> dict:
     return json.loads(text)
 
 
+def _coerce_item_text(value: Any) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 3 and lines[0].startswith("```") and lines[-1].startswith("```"):
+                text = "\n".join(lines[1:-1]).strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+
+        if (text.startswith("{") and text.endswith("}")) or (
+            text.startswith("[") and text.endswith("]")
+        ):
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(text)
+                    return _coerce_item_text(parsed)
+                except Exception:
+                    continue
+        return text
+
+    if isinstance(value, dict):
+        preferred_keys = (
+            "drill",
+            "title",
+            "description",
+            "focus",
+            "summary",
+            "text",
+            "name",
+            "objective",
+            "cue",
+        )
+        for key in preferred_keys:
+            if key in value:
+                resolved = _coerce_item_text(value.get(key))
+                if resolved:
+                    return resolved
+
+        parts: list[str] = []
+        for key, raw in value.items():
+            resolved = _coerce_item_text(raw)
+            if not resolved:
+                continue
+            parts.append(f"{key}: {resolved}")
+        return " | ".join(parts).strip()
+
+    if isinstance(value, (list, tuple, set)):
+        parts = [_coerce_item_text(item) for item in value]
+        return " | ".join([part for part in parts if part]).strip()
+
+    return str(value).strip()
+
+
+def _coerce_text_list(values: Any, limit: int) -> list[str]:
+    if values is None:
+        return []
+
+    if isinstance(values, (list, tuple, set)):
+        iterable = list(values)
+    else:
+        iterable = [values]
+
+    coerced: list[str] = []
+    for item in iterable:
+        text = _coerce_item_text(item)
+        if not text:
+            continue
+        coerced.append(text)
+        if len(coerced) >= limit:
+            break
+    return coerced
+
+
 def generate_coaching_insight(
     timeline: MatchTimeline,
     llm_model: str = "gpt-4.1-mini",
     openai_api_key: str | None = None,
+    player_a_name: str = "Player A",
+    player_b_name: str = "Player B",
 ) -> CoachingInsight:
+    player_a = player_a_name.strip() or "Player A"
+    player_b = player_b_name.strip() or "Player B"
     api_key = (openai_api_key or "").strip() or os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return _local_fallback_insight(timeline)
+        local = _local_fallback_insight(timeline)
+        local.report_markdown = _replace_player_tokens(local.report_markdown, player_a, player_b)
+        local.key_patterns = [_replace_player_tokens(x, player_a, player_b) for x in local.key_patterns]
+        local.drills = [_replace_player_tokens(x, player_a, player_b) for x in local.drills]
+        return local
 
     try:
         from openai import OpenAI
 
         client = OpenAI(api_key=api_key)
         user_payload = {
-            "instruction": "Return strict JSON with keys: report_markdown, key_patterns, drills, confidence.",
+            "instruction": "Return strict JSON with keys: report_markdown, key_patterns, drills, confidence. Use player names in text.",
+            "player_names": {"A": player_a, "B": player_b},
             "timeline": timeline.model_dump(),
         }
         response = client.responses.create(
@@ -120,12 +224,20 @@ def generate_coaching_insight(
         raw_text = response.output_text
         payload = _extract_json_block(raw_text)
 
-        return CoachingInsight(
+        insight = CoachingInsight(
             model=llm_model,
-            report_markdown=str(payload.get("report_markdown", "")).strip(),
-            key_patterns=[str(x) for x in payload.get("key_patterns", [])][:12],
-            drills=[str(x) for x in payload.get("drills", [])][:10],
+            report_markdown=_coerce_item_text(payload.get("report_markdown", "")).strip(),
+            key_patterns=_coerce_text_list(payload.get("key_patterns", []), limit=12),
+            drills=_coerce_text_list(payload.get("drills", []), limit=10),
             confidence=str(payload.get("confidence", "medium")),
         )
+        insight.report_markdown = _replace_player_tokens(insight.report_markdown, player_a, player_b)
+        insight.key_patterns = [_replace_player_tokens(x, player_a, player_b) for x in insight.key_patterns]
+        insight.drills = [_replace_player_tokens(x, player_a, player_b) for x in insight.drills]
+        return insight
     except Exception:
-        return _local_fallback_insight(timeline)
+        local = _local_fallback_insight(timeline)
+        local.report_markdown = _replace_player_tokens(local.report_markdown, player_a, player_b)
+        local.key_patterns = [_replace_player_tokens(x, player_a, player_b) for x in local.key_patterns]
+        local.drills = [_replace_player_tokens(x, player_a, player_b) for x in local.drills]
+        return local

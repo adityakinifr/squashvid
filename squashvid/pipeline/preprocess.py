@@ -39,6 +39,122 @@ def _frame_motion_ratio(previous_gray: np.ndarray, current_gray: np.ndarray) -> 
     return float(np.count_nonzero(mask) / mask.size)
 
 
+def _segments_from_motion_samples(
+    motion_samples: list[tuple[float, float]],
+    threshold: float,
+    min_rally_sec: float,
+    idle_gap_sec: float,
+    total_duration: float,
+    max_rallies: int | None,
+) -> list[Segment]:
+    current_start: float | None = None
+    last_active: float | None = None
+    segments: list[Segment] = []
+
+    for timestamp, motion_ratio in motion_samples:
+        is_active = motion_ratio >= threshold
+        if is_active:
+            if current_start is None:
+                current_start = timestamp
+            last_active = timestamp
+            continue
+
+        if current_start is None or last_active is None:
+            continue
+
+        if (timestamp - last_active) >= idle_gap_sec:
+            if (last_active - current_start) >= min_rally_sec:
+                segments.append(Segment(start_sec=current_start, end_sec=last_active))
+                if max_rallies is not None and len(segments) >= max_rallies:
+                    return segments
+            current_start = None
+            last_active = None
+
+    if current_start is not None and last_active is not None:
+        end_sec = max(last_active, min(total_duration, last_active + 0.1))
+        if (end_sec - current_start) >= min_rally_sec:
+            segments.append(Segment(start_sec=current_start, end_sec=end_sec))
+
+    return segments[:max_rallies] if max_rallies is not None else segments
+
+
+def _adaptive_segments_from_samples(
+    motion_samples: list[tuple[float, float]],
+    base_threshold: float,
+    min_rally_sec: float,
+    idle_gap_sec: float,
+    total_duration: float,
+    max_rallies: int | None,
+) -> list[Segment]:
+    if len(motion_samples) < 20:
+        return []
+
+    ratios = np.array([sample[1] for sample in motion_samples], dtype=float)
+    if ratios.size == 0:
+        return []
+
+    quantile_thresholds = [
+        float(np.percentile(ratios, p))
+        for p in (95, 92, 90, 88, 85, 82, 80, 78, 75, 72, 70, 68, 65)
+    ]
+    scaled_thresholds = [base_threshold * f for f in (0.85, 0.75, 0.65, 0.55, 0.5)]
+    raw_candidates = [*quantile_thresholds, *scaled_thresholds]
+
+    threshold_candidates: list[float] = []
+    seen: set[float] = set()
+    for candidate in raw_candidates:
+        thr = max(0.0015, min(0.3, float(candidate)))
+        key = round(thr, 6)
+        if key in seen:
+            continue
+        seen.add(key)
+        threshold_candidates.append(thr)
+
+    threshold_candidates.sort(reverse=True)
+
+    best_segments: list[Segment] = []
+    best_score = float("-inf")
+    long_limit = max(120.0, min(total_duration * 0.8, 240.0))
+
+    for threshold in threshold_candidates:
+        segments = _segments_from_motion_samples(
+            motion_samples=motion_samples,
+            threshold=threshold,
+            min_rally_sec=min_rally_sec,
+            idle_gap_sec=idle_gap_sec,
+            total_duration=total_duration,
+            max_rallies=max_rallies,
+        )
+        if not segments:
+            continue
+
+        durations = np.array([seg.duration_sec for seg in segments], dtype=float)
+        count = int(durations.size)
+        max_duration = float(durations.max()) if count else 0.0
+        median_duration = float(np.median(durations)) if count else 0.0
+        avg_duration = float(durations.mean()) if count else 0.0
+
+        score = float(count)
+        if count < 2:
+            score -= 4.0
+        if median_duration < (min_rally_sec * 1.05):
+            score -= 3.0
+        if avg_duration > 55.0:
+            score -= 2.0
+        if max_duration > long_limit:
+            score -= 8.0
+        elif max_duration > 90.0:
+            score -= 2.0
+
+        if score > best_score:
+            best_score = score
+            best_segments = segments
+
+    if len(best_segments) >= 2:
+        return best_segments
+    return []
+
+
 def detect_active_segments(
     video_path: str,
     motion_threshold: float = 0.018,
@@ -47,6 +163,7 @@ def detect_active_segments(
     downscale_width: int = 480,
     frame_step: int = 2,
     max_rallies: int | None = None,
+    max_duration_sec: float | None = None,
 ) -> list[Segment]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -56,12 +173,17 @@ def detect_active_segments(
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     previous_gray: np.ndarray | None = None
-    current_start: float | None = None
-    last_active: float | None = None
-    segments: list[Segment] = []
+    motion_samples: list[tuple[float, float]] = []
+
+    max_duration = float(max_duration_sec) if max_duration_sec is not None else None
+    if max_duration is not None and max_duration <= 0.0:
+        max_duration = None
 
     index = 0
     while True:
+        if max_duration is not None and (index / fps) >= max_duration:
+            break
+
         ok, frame = cap.read()
         if not ok:
             break
@@ -80,36 +202,54 @@ def detect_active_segments(
         previous_gray = gray
 
         timestamp = index / fps
-        is_active = motion_ratio >= motion_threshold
-        if is_active:
-            if current_start is None:
-                current_start = timestamp
-            last_active = timestamp
-        elif current_start is not None and last_active is not None:
-            if (timestamp - last_active) >= idle_gap_sec:
-                if (last_active - current_start) >= min_rally_sec:
-                    segments.append(Segment(start_sec=current_start, end_sec=last_active))
-                    if max_rallies is not None and len(segments) >= max_rallies:
-                        break
-                current_start = None
-                last_active = None
+        motion_samples.append((timestamp, motion_ratio))
 
         index += 1
         if frame_step > 1:
             for _ in range(frame_step - 1):
+                if max_duration is not None and ((index + 1) / fps) >= max_duration:
+                    break
                 if not cap.grab():
                     break
                 index += 1
 
     cap.release()
 
-    total_duration = (frame_count / fps) if fps else 0.0
-    if current_start is not None and last_active is not None:
-        end_sec = max(last_active, min(total_duration, last_active + 0.1))
-        if (end_sec - current_start) >= min_rally_sec:
-            segments.append(Segment(start_sec=current_start, end_sec=end_sec))
+    observed_duration = (index / fps) if fps else 0.0
+    total_duration = (frame_count / fps) if fps and frame_count > 0 else 0.0
+    total_duration = max(total_duration, observed_duration)
+    if max_duration is not None:
+        total_duration = min(total_duration, max_duration)
 
-    if not segments and total_duration >= min_rally_sec:
+    segments = _segments_from_motion_samples(
+        motion_samples=motion_samples,
+        threshold=motion_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=idle_gap_sec,
+        total_duration=total_duration,
+        max_rallies=max_rallies,
+    )
+
+    needs_adaptive = False
+    if not segments:
+        needs_adaptive = True
+    elif len(segments) == 1 and total_duration > 120.0:
+        needs_adaptive = segments[0].duration_sec > max(100.0, total_duration * 0.72)
+
+    if needs_adaptive:
+        adaptive_segments = _adaptive_segments_from_samples(
+            motion_samples=motion_samples,
+            base_threshold=motion_threshold,
+            min_rally_sec=min_rally_sec,
+            idle_gap_sec=idle_gap_sec,
+            total_duration=total_duration,
+            max_rallies=max_rallies,
+        )
+        if adaptive_segments:
+            segments = adaptive_segments
+
+    min_full_segment_sec = min(min_rally_sec, 1.0)
+    if not segments and total_duration >= min_full_segment_sec:
         segments.append(Segment(start_sec=0.0, end_sec=total_duration))
 
     return segments[:max_rallies] if max_rallies is not None else segments

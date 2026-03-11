@@ -4,6 +4,8 @@ const statusText = document.getElementById("status-text");
 const analyzeBtn = document.getElementById("analyze-btn");
 const sourceInput = document.getElementById("source-input");
 const fileInput = document.getElementById("video-file");
+const playerANameInput = document.getElementById("player-a-name");
+const playerBNameInput = document.getElementById("player-b-name");
 const pathGroup = document.getElementById("path-group");
 const uploadGroup = document.getElementById("upload-group");
 
@@ -13,10 +15,29 @@ const tacticalBars = document.getElementById("tactical-bars");
 const movementCards = document.getElementById("movement-cards");
 const rallyChart = document.getElementById("rally-chart");
 const rallyList = document.getElementById("rally-list");
+const rallySort = document.getElementById("rally-sort");
+const winnerFilter = document.getElementById("winner-filter");
+const durationMinInput = document.getElementById("duration-min");
+const durationMaxInput = document.getElementById("duration-max");
+const shotsMinInput = document.getElementById("shots-min");
+const shotsMaxInput = document.getElementById("shots-max");
+const rallyPicker = document.getElementById("rally-picker");
+const rallyPickerBtn = document.getElementById("rally-picker-btn");
+const rallyToolbarStatus = document.getElementById("rally-toolbar-status");
 const rawJson = document.getElementById("raw-json");
+const reviewPanel = document.getElementById("review-panel");
+const reviewMeta = document.getElementById("review-meta");
+const reviewCanvas = document.getElementById("review-canvas");
+const reviewVideo = document.getElementById("review-video");
+const rallyScrubber = document.getElementById("rally-scrubber");
+const shotMarkers = document.getElementById("shot-markers");
+const shotCaption = document.getElementById("shot-caption");
+const selectedRallyKpis = document.getElementById("selected-rally-kpis");
+const selectedRallyShots = document.getElementById("selected-rally-shots");
 
 const insightPanel = document.getElementById("insight-panel");
 const insightModel = document.getElementById("insight-model");
+const insightSummaryCards = document.getElementById("insight-summary-cards");
 const insightBody = document.getElementById("insight-body");
 const patternList = document.getElementById("pattern-list");
 const drillList = document.getElementById("drill-list");
@@ -29,6 +50,14 @@ const rallyTemplate = document.getElementById("rally-template");
 const modeRadios = Array.from(document.querySelectorAll("input[name='source_mode']"));
 let progressTicker = null;
 let progressStartTs = 0;
+const reviewCtx = reviewCanvas ? reviewCanvas.getContext("2d") : null;
+let currentResult = null;
+let activeRally = null;
+let reviewRaf = null;
+let reviewTimeSync = false;
+let allRallies = [];
+let displayedRallies = [];
+let playerNames = { A: "Player A", B: "Player B" };
 
 function activeMode() {
   const checked = modeRadios.find((radio) => radio.checked);
@@ -71,10 +100,86 @@ function fmtPct(value, digits = 1) {
   return `${(Number(value) * 100).toFixed(digits)}%`;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function clearChildren(element) {
   while (element.firstChild) {
     element.removeChild(element.firstChild);
   }
+}
+
+function updatePlayerNamesFromInputs() {
+  const a = (playerANameInput?.value || "").trim();
+  const b = (playerBNameInput?.value || "").trim();
+  playerNames = {
+    A: a || "Player A",
+    B: b || "Player B",
+  };
+}
+
+function playerLabel(value) {
+  if (value === "A") {
+    return playerNames.A;
+  }
+  if (value === "B") {
+    return playerNames.B;
+  }
+  return "Unknown";
+}
+
+function withNamedPlayers(text) {
+  return String(text || "")
+    .replaceAll("Player A", playerNames.A)
+    .replaceAll("Player B", playerNames.B)
+    .replaceAll("A avg", `${playerNames.A} avg`)
+    .replaceAll("B avg", `${playerNames.B} avg`)
+    .replaceAll("A T", `${playerNames.A} T`)
+    .replaceAll("B T", `${playerNames.B} T`);
+}
+
+function formatOutcomeText(outcome) {
+  const raw = String(outcome || "Outcome unknown");
+  if (raw === "unknown") {
+    return "Outcome unknown";
+  }
+  return withNamedPlayers(raw)
+    .replaceAll("A winner", `${playerNames.A} winner`)
+    .replaceAll("B winner", `${playerNames.B} winner`)
+    .replaceAll("A pressure", `${playerNames.A} pressure`)
+    .replaceAll("B pressure", `${playerNames.B} pressure`)
+    .replaceAll("A forced error", `${playerNames.A} forced error`)
+    .replaceAll("B forced error", `${playerNames.B} forced error`);
+}
+
+function refreshWinnerFilterLabels() {
+  if (!winnerFilter) {
+    return;
+  }
+  const aOpt = winnerFilter.querySelector('option[value="A"]');
+  const bOpt = winnerFilter.querySelector('option[value="B"]');
+  if (aOpt) {
+    aOpt.textContent = `${playerNames.A} Wins`;
+  }
+  if (bOpt) {
+    bOpt.textContent = `${playerNames.B} Wins`;
+  }
+}
+
+function parseBound(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) {
+    return null;
+  }
+  return num;
 }
 
 function markdownToHtml(markdown) {
@@ -140,6 +245,265 @@ function markdownToHtml(markdown) {
   return out.join("\n");
 }
 
+function normalizeInsightItem(item) {
+  const raw = String(item ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (raw === "[object Object]") {
+    return "Structured recommendation";
+  }
+
+  if (
+    (raw.startsWith("{") && raw.endsWith("}")) ||
+    (raw.startsWith("[") && raw.endsWith("]"))
+  ) {
+    let jsonCandidate = raw;
+    if (raw.includes("'") && !raw.includes('"')) {
+      jsonCandidate = raw
+        .replace(/([{,]\s*)'([^']+?)'\s*:/g, '$1"$2":')
+        .replace(/:\s*'([^']*?)'(?=\s*[,}])/g, ': "$1"');
+    }
+    try {
+      const parsed = JSON.parse(jsonCandidate);
+      if (typeof parsed === "string") {
+        return parsed.trim();
+      }
+      if (Array.isArray(parsed)) {
+        return parsed.map((x) => String(x)).join(" | ").trim();
+      }
+      if (parsed && typeof parsed === "object") {
+        for (const key of ["drill", "title", "description", "focus", "text", "summary"]) {
+          if (parsed[key]) {
+            return String(parsed[key]).trim();
+          }
+        }
+        return Object.entries(parsed)
+          .map(([k, v]) => `${k}: ${String(v)}`)
+          .join(" | ")
+          .trim();
+      }
+    } catch {
+      if (raw.startsWith("{") && raw.endsWith("}")) {
+        return raw
+          .slice(1, -1)
+          .replaceAll('"', "")
+          .replaceAll("'", "")
+          .replaceAll(":", " ")
+          .replaceAll(",", " | ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+    }
+  }
+  return raw;
+}
+
+function classifyDrillType(text) {
+  const value = String(text || "").toLowerCase();
+  if (
+    value.includes("ghost") ||
+    value.includes("footwork") ||
+    value.includes("recover") ||
+    value.includes("lunge") ||
+    value.includes("split")
+  ) {
+    return "footwork";
+  }
+  if (
+    value.includes("length") ||
+    value.includes("drive") ||
+    value.includes("target") ||
+    value.includes("backhand")
+  ) {
+    return "length";
+  }
+  return "decision";
+}
+
+function drillIconSvg(type) {
+  if (type === "footwork") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 13l4-3 2 2 4 1 1 5H7z"/><path d="M11 10l-1-4 3-1 2 3"/></svg>';
+  }
+  if (type === "length") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.5"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 9a4 4 0 118 0c0 2-1 3-2 4-1 1-1 2-1 3"/><path d="M11 20h2"/><path d="M9 6l-2-2"/><path d="M15 6l2-2"/></svg>';
+}
+
+function reportTone(title) {
+  const value = String(title || "").toLowerCase();
+  if (value.includes("movement") || value.includes("coverage") || value.includes("recovery")) {
+    return "movement";
+  }
+  if (value.includes("difference") || value.includes("early") || value.includes("late")) {
+    return "compare";
+  }
+  if (value.includes("cause") || value.includes("lost") || value.includes("error")) {
+    return "risk";
+  }
+  if (value.includes("adjustment") || value.includes("recommend") || value.includes("drill")) {
+    return "action";
+  }
+  return "tactical";
+}
+
+function reportToneLabel(tone) {
+  if (tone === "movement") {
+    return "Movement";
+  }
+  if (tone === "compare") {
+    return "Comparison";
+  }
+  if (tone === "risk") {
+    return "Risk";
+  }
+  if (tone === "action") {
+    return "Action Plan";
+  }
+  return "Tactical";
+}
+
+function reportToneIconSvg(tone) {
+  if (tone === "movement") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17l4-5 3 2 5-7"/><circle cx="7" cy="7" r="2"/></svg>';
+  }
+  if (tone === "compare") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h6"/><path d="M5 12h10"/><path d="M5 16h6"/><path d="M16 6l3 3-3 3"/><path d="M19 15l-3 3-3-3"/></svg>';
+  }
+  if (tone === "risk") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l8 14H4z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg>';
+  }
+  if (tone === "action") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l5 5L20 6"/><path d="M4 6h6"/><path d="M4 18h10"/></svg>';
+  }
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16"/><path d="M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>';
+}
+
+function cleanSectionTitle(rawTitle) {
+  return String(rawTitle || "Section")
+    .replace(/^\d+\s*[\)\].:-]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseReportItem(item) {
+  const text = normalizeInsightItem(item)
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return { number: "", title: "", body: "" };
+  }
+
+  let value = text;
+  let number = "";
+  const numbered = value.match(/^(\d+)\s*[\)\].:-]\s*(.+)$/);
+  if (numbered) {
+    number = numbered[1];
+    value = numbered[2].trim();
+  }
+
+  let title = "";
+  let body = "";
+  const strongSplit = value.match(/^\*\*([^*]+)\*\*\s*[:\-]?\s*(.*)$/);
+  if (strongSplit) {
+    title = strongSplit[1].trim();
+    body = strongSplit[2].trim();
+  } else {
+    const colonSplit = value.match(/^([^:]{3,56}):\s+(.+)$/);
+    if (colonSplit) {
+      title = colonSplit[1].trim();
+      body = colonSplit[2].trim();
+    } else {
+      body = value;
+    }
+  }
+
+  return { number, title, body };
+}
+
+function parseReportSections(markdown) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const sections = [];
+  let current = { title: "Summary", items: [] };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("#")) {
+      if (current.items.length > 0) {
+        sections.push(current);
+      }
+      current = { title: line.replace(/^#+\s*/, "").trim() || "Section", items: [] };
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      current.items.push(line.slice(2).trim());
+      continue;
+    }
+    current.items.push(line);
+  }
+  if (current.items.length > 0) {
+    sections.push(current);
+  }
+  return sections;
+}
+
+function renderReportCards(markdown) {
+  clearChildren(insightBody);
+  const sections = parseReportSections(markdown);
+  if (!sections.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No report text available.";
+    insightBody.appendChild(empty);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "report-cards";
+  for (const section of sections) {
+    const tone = reportTone(section.title);
+    const title = cleanSectionTitle(withNamedPlayers(section.title));
+    const card = document.createElement("article");
+    card.className = `report-section-card tone-${tone}`;
+    const head = document.createElement("div");
+    head.className = "report-section-head";
+    head.innerHTML = `
+      <span class="report-section-badge">
+        <span class="report-section-icon">${reportToneIconSvg(tone)}</span>
+        <span>${escapeHtml(reportToneLabel(tone))}</span>
+      </span>
+      <p class="report-section-title">${escapeHtml(title)}</p>
+      <p class="report-section-sub">${escapeHtml(String(section.items.length))} points</p>
+    `;
+    card.appendChild(head);
+
+    const grid = document.createElement("div");
+    grid.className = "report-item-grid";
+    for (const item of section.items) {
+      const parsed = parseReportItem(withNamedPlayers(item));
+      const itemCard = document.createElement("article");
+      itemCard.className = "report-item-card";
+      const numberText = parsed.number ? escapeHtml(parsed.number) : "•";
+      const titleText = parsed.title ? escapeHtml(withNamedPlayers(parsed.title)) : "";
+      const bodyText = escapeHtml(withNamedPlayers(parsed.body || ""));
+      itemCard.innerHTML = `
+        <span class="report-item-number">${numberText}</span>
+        <div class="report-item-copy">
+          ${titleText ? `<p class="report-item-title">${titleText}</p>` : ""}
+          <p class="report-item-body">${bodyText}</p>
+        </div>
+      `;
+      grid.appendChild(itemCard);
+    }
+    card.appendChild(grid);
+    wrap.appendChild(card);
+  }
+  insightBody.appendChild(wrap);
+}
+
 function normalizedValue(metricKey, value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return 0;
@@ -201,6 +565,391 @@ function stopProgressTicker() {
   }
 }
 
+function rallyShotsCount(rally) {
+  return Array.isArray(rally?.shots) ? rally.shots.length : 0;
+}
+
+function inferRallyWinnerCode(rally) {
+  const outcome = String(rally?.outcome || "");
+  if (!outcome || outcome === "unknown") {
+    return "unknown";
+  }
+  if (outcome.includes("A winner") || outcome.includes("B forced error")) {
+    return "A";
+  }
+  if (outcome.includes("B winner") || outcome.includes("A forced error")) {
+    return "B";
+  }
+  return "unknown";
+}
+
+function rallyPassesFilters(rally) {
+  const winnerCode = inferRallyWinnerCode(rally);
+  const winnerValue = winnerFilter?.value || "all";
+  if (winnerValue !== "all" && winnerCode !== winnerValue) {
+    return false;
+  }
+
+  const duration = Number(rally.duration_sec || 0);
+  const minDuration = parseBound(durationMinInput?.value);
+  const maxDuration = parseBound(durationMaxInput?.value);
+  if (minDuration !== null && duration < minDuration) {
+    return false;
+  }
+  if (maxDuration !== null && duration > maxDuration) {
+    return false;
+  }
+
+  const shotCount = rallyShotsCount(rally);
+  const minShots = parseBound(shotsMinInput?.value);
+  const maxShots = parseBound(shotsMaxInput?.value);
+  if (minShots !== null && shotCount < minShots) {
+    return false;
+  }
+  if (maxShots !== null && shotCount > maxShots) {
+    return false;
+  }
+
+  return true;
+}
+
+function filterRallies(rallies) {
+  return rallies.filter((rally) => rallyPassesFilters(rally));
+}
+
+function sortRallies(rallies, mode) {
+  const rows = [...rallies];
+  if (mode === "longest") {
+    rows.sort((a, b) => Number(b.duration_sec || 0) - Number(a.duration_sec || 0));
+  } else if (mode === "shortest") {
+    rows.sort((a, b) => Number(a.duration_sec || 0) - Number(b.duration_sec || 0));
+  } else if (mode === "most_shots") {
+    rows.sort((a, b) => rallyShotsCount(b) - rallyShotsCount(a));
+  } else {
+    rows.sort((a, b) => Number(a.rally_id || 0) - Number(b.rally_id || 0));
+  }
+  return rows;
+}
+
+function updateRallyToolbarStatus() {
+  if (!Array.isArray(displayedRallies) || displayedRallies.length === 0) {
+    rallyToolbarStatus.textContent = "No rallies match current filters.";
+    return;
+  }
+
+  const top = displayedRallies[0];
+  const mode = rallySort?.value || "match";
+  const countText = `${displayedRallies.length} shown / ${allRallies.length} total`;
+  if (mode === "longest") {
+    rallyToolbarStatus.textContent = `${countText}. Longest first: Rally ${top.rally_id} (${fmt(top.duration_sec, 1)}s).`;
+  } else if (mode === "shortest") {
+    rallyToolbarStatus.textContent = `${countText}. Shortest first: Rally ${top.rally_id} (${fmt(top.duration_sec, 1)}s).`;
+  } else if (mode === "most_shots") {
+    rallyToolbarStatus.textContent = `${countText}. Most shots first: Rally ${top.rally_id} (${rallyShotsCount(top)} shots).`;
+  } else {
+    rallyToolbarStatus.textContent = `${countText}. Sorted by match order.`;
+  }
+}
+
+function applyRallySortRender() {
+  const filtered = filterRallies(allRallies);
+  displayedRallies = sortRallies(filtered, rallySort?.value || "match");
+  if (displayedRallies.length === 0 && allRallies.length > 0) {
+    renderRallies(displayedRallies, { emptyMessage: "No rallies match current filters." });
+  } else {
+    renderRallies(displayedRallies);
+  }
+  if (activeRally) {
+    const refreshed = displayedRallies.find(
+      (item) => Number(item.rally_id) === Number(activeRally.rally_id)
+    );
+    if (refreshed) {
+      activeRally = refreshed;
+    }
+  }
+
+  if (!activeRally && displayedRallies.length > 0) {
+    activeRally = displayedRallies[0];
+  } else if (displayedRallies.length === 0) {
+    activeRally = null;
+    clearChildren(selectedRallyKpis);
+    clearChildren(selectedRallyShots);
+    clearChildren(shotMarkers);
+    shotCaption.textContent = "";
+    if (reviewVideo && !reviewVideo.paused) {
+      reviewVideo.pause();
+    }
+    if (reviewCtx) {
+      reviewCtx.clearRect(0, 0, reviewCanvas.width, reviewCanvas.height);
+    }
+    updateReviewMeta();
+  }
+  highlightActiveRallyCard();
+  updateRallyToolbarStatus();
+}
+
+function jumpToRallyById(rallyId) {
+  const target = allRallies.find((item) => Number(item.rally_id) === Number(rallyId));
+  if (!target) {
+    rallyToolbarStatus.textContent = `Rally ${rallyId} was not found in this analysis.`;
+    return;
+  }
+
+  if (rallySort) {
+    rallySort.value = "match";
+  }
+  if (winnerFilter) {
+    winnerFilter.value = "all";
+  }
+  if (durationMinInput) {
+    durationMinInput.value = "";
+  }
+  if (durationMaxInput) {
+    durationMaxInput.value = "";
+  }
+  if (shotsMinInput) {
+    shotsMinInput.value = "";
+  }
+  if (shotsMaxInput) {
+    shotsMaxInput.value = "";
+  }
+  applyRallySortRender();
+  selectRally(target);
+
+  const node = rallyList.querySelector(`[data-rally-id="${target.rally_id}"]`);
+  if (node) {
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  rallyToolbarStatus.textContent = `Jumped to Rally ${target.rally_id}.`;
+}
+
+function stopReviewLoop() {
+  if (reviewRaf) {
+    cancelAnimationFrame(reviewRaf);
+    reviewRaf = null;
+  }
+}
+
+function rallyDuration(rally) {
+  return Math.max(0.001, Number(rally.end_time) - Number(rally.start_time));
+}
+
+function getCropNorm(rally) {
+  const fallback = { x: 0, y: 0, w: 1, h: 1 };
+  const crop = rally?.metadata?.focus_crop_norm;
+  if (!crop || typeof crop !== "object") {
+    return fallback;
+  }
+  return {
+    x: clamp(Number(crop.x ?? 0), 0, 1),
+    y: clamp(Number(crop.y ?? 0), 0, 1),
+    w: clamp(Number(crop.w ?? 1), 0.05, 1),
+    h: clamp(Number(crop.h ?? 1), 0.05, 1),
+  };
+}
+
+function drawReviewFrame() {
+  if (!reviewCtx || !activeRally || !reviewVideo || reviewVideo.readyState < 2) {
+    return;
+  }
+
+  const vw = Number(reviewVideo.videoWidth || 0);
+  const vh = Number(reviewVideo.videoHeight || 0);
+  if (!vw || !vh) {
+    return;
+  }
+
+  const crop = getCropNorm(activeRally);
+  const sx = clamp(crop.x * vw, 0, vw - 1);
+  const sy = clamp(crop.y * vh, 0, vh - 1);
+  const sw = clamp(crop.w * vw, 1, vw - sx);
+  const sh = clamp(crop.h * vh, 1, vh - sy);
+
+  reviewCtx.clearRect(0, 0, reviewCanvas.width, reviewCanvas.height);
+  reviewCtx.drawImage(reviewVideo, sx, sy, sw, sh, 0, 0, reviewCanvas.width, reviewCanvas.height);
+
+  if (!reviewVideo.paused && !reviewVideo.ended) {
+    reviewRaf = requestAnimationFrame(drawReviewFrame);
+  }
+}
+
+function updateReviewMeta() {
+  if (!activeRally) {
+    reviewMeta.textContent = "Select a rally card to inspect the cropped view.";
+    return;
+  }
+  reviewMeta.textContent =
+    `Rally ${activeRally.rally_id}: ` +
+    `${fmt(activeRally.start_time, 1)}s -> ${fmt(activeRally.end_time, 1)}s ` +
+    `(${fmt(activeRally.duration_sec, 1)}s) | ${formatOutcomeText(activeRally.outcome)}`;
+}
+
+function describeShot(shot) {
+  const label = playerLabel(shot?.player || "Unknown");
+  const type = shot?.type || "shot";
+  const side = shot?.side ? ` ${shot.side}` : "";
+  return `${label} ${type}${side}`.trim();
+}
+
+function summarizeShotTypes(shots) {
+  if (!Array.isArray(shots) || shots.length === 0) {
+    return [];
+  }
+  const counts = {};
+  for (const shot of shots) {
+    const key = String(shot.type || "shot");
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 3)
+    .map(([name, count]) => `${name} x${count}`);
+}
+
+function renderSelectedRallyDetails(rally) {
+  clearChildren(selectedRallyKpis);
+  clearChildren(selectedRallyShots);
+  if (!rally) {
+    return;
+  }
+
+  const tags = [
+    `Duration ${fmt(rally.duration_sec, 1)}s`,
+    `Shots ${rallyShotsCount(rally)}`,
+    `${playerNames.A} T ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
+    `${playerNames.B} T ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
+    `${playerNames.A} recover ${rally.positions?.A_avg_T_recovery_sec ? `${fmt(rally.positions.A_avg_T_recovery_sec)}s` : "n/a"}`,
+    `${playerNames.B} recover ${rally.positions?.B_avg_T_recovery_sec ? `${fmt(rally.positions.B_avg_T_recovery_sec)}s` : "n/a"}`,
+  ];
+  for (const text of tags) {
+    const el = document.createElement("span");
+    el.className = "selected-rally-tag";
+    el.textContent = text;
+    selectedRallyKpis.appendChild(el);
+  }
+
+  const shots = Array.isArray(rally.shots) ? rally.shots : [];
+  if (!shots.length) {
+    const empty = document.createElement("p");
+    empty.className = "selected-rally-empty";
+    empty.textContent = "No shot sequence available for this rally.";
+    selectedRallyShots.appendChild(empty);
+    return;
+  }
+
+  for (const shot of shots) {
+    const row = document.createElement("div");
+    row.className = "selected-shot-row";
+    row.innerHTML = `
+      <span class="selected-shot-time">${escapeHtml(fmt(shot.timestamp, 2))}s</span>
+      <span class="selected-shot-player">${escapeHtml(playerLabel(shot.player))}</span>
+      <span class="selected-shot-type">${escapeHtml(shot.type || "shot")}</span>
+      <span class="selected-shot-side">${escapeHtml(shot.side || "")}</span>
+    `;
+    selectedRallyShots.appendChild(row);
+  }
+}
+
+function updateShotCaption() {
+  if (!activeRally) {
+    shotCaption.textContent = "";
+    return;
+  }
+  const shots = Array.isArray(activeRally.shots) ? activeRally.shots : [];
+  const current = Number(reviewVideo.currentTime || 0);
+  if (!shots.length) {
+    shotCaption.textContent = `t=${fmt(current, 2)}s | no shot markers available for this rally`;
+    return;
+  }
+
+  let nearest = null;
+  let nearestDelta = Number.POSITIVE_INFINITY;
+  for (const shot of shots) {
+    const delta = Math.abs(Number(shot.timestamp || 0) - current);
+    if (delta < nearestDelta) {
+      nearestDelta = delta;
+      nearest = shot;
+    }
+  }
+
+  if (nearest && nearestDelta <= 0.35) {
+    shotCaption.textContent = `${describeShot(nearest)} @ ${fmt(nearest.timestamp, 2)}s`;
+  } else {
+    shotCaption.textContent = `t=${fmt(current, 2)}s`;
+  }
+}
+
+function renderShotMarkers(rally) {
+  clearChildren(shotMarkers);
+  const shots = Array.isArray(rally.shots) ? rally.shots : [];
+  const start = Number(rally.start_time || 0);
+  const duration = rallyDuration(rally);
+
+  for (const shot of shots) {
+    const ts = Number(shot.timestamp || 0);
+    if (ts < start || ts > start + duration) {
+      continue;
+    }
+    const ratio = clamp((ts - start) / duration, 0, 1);
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = `shot-marker ${String(shot.player || "unknown").toLowerCase()}`;
+    marker.style.left = `${ratio * 100}%`;
+    marker.title = `${describeShot(shot)} @ ${fmt(ts, 2)}s`;
+    marker.addEventListener("click", (event) => {
+      event.stopPropagation();
+      reviewVideo.currentTime = ts;
+      drawReviewFrame();
+      updateShotCaption();
+    });
+    shotMarkers.appendChild(marker);
+  }
+}
+
+function highlightActiveRallyCard() {
+  const selectedId = activeRally ? String(activeRally.rally_id) : "";
+  for (const node of rallyList.querySelectorAll(".rally-card")) {
+    node.classList.toggle("active", node.dataset.rallyId === selectedId);
+  }
+}
+
+function selectRally(rally) {
+  activeRally = rally;
+  highlightActiveRallyCard();
+  updateReviewMeta();
+  renderShotMarkers(rally);
+  renderSelectedRallyDetails(rally);
+
+  const start = Number(rally.start_time || 0);
+  rallyScrubber.value = "0";
+  if (reviewVideo.readyState >= 1) {
+    reviewVideo.currentTime = start;
+    drawReviewFrame();
+    updateShotCaption();
+  }
+}
+
+function setupReviewPanel(data, rallies) {
+  const sourceVideoUrl = data?.source_video_url;
+  if (!sourceVideoUrl || !Array.isArray(rallies) || rallies.length === 0) {
+    reviewPanel.classList.add("hidden");
+    activeRally = null;
+    clearChildren(selectedRallyKpis);
+    clearChildren(selectedRallyShots);
+    stopReviewLoop();
+    return;
+  }
+
+  reviewPanel.classList.remove("hidden");
+  if (reviewVideo.getAttribute("data-src") !== sourceVideoUrl) {
+    reviewVideo.setAttribute("data-src", sourceVideoUrl);
+    reviewVideo.src = sourceVideoUrl;
+    reviewVideo.load();
+  }
+
+  selectRally(rallies[0]);
+}
+
 async function submitAnalyze(event) {
   event.preventDefault();
 
@@ -208,14 +957,20 @@ async function submitAnalyze(event) {
   const includeLlm = document.getElementById("include-llm").checked;
   const llmModel = document.getElementById("llm-model").value.trim() || "gpt-4.1-mini";
   const openaiApiKey = document.getElementById("openai-api-key").value.trim();
+  const playerAName = (playerANameInput?.value || "").trim() || "Player A";
+  const playerBName = (playerBNameInput?.value || "").trim() || "Player B";
   const maxRallies = document.getElementById("max-rallies").value.trim();
   const youtubeCacheDir = document.getElementById("youtube-cache").value.trim();
+  const cvWorkersRaw = document.getElementById("cv-workers").value.trim();
+  const maxVideoMinutesRaw = document.getElementById("max-video-minutes").value.trim();
 
   const motionThreshold = Number(document.getElementById("motion-threshold").value || "0.018");
   const minRallySec = Number(document.getElementById("min-rally-sec").value || "4.0");
   const idleGapSec = Number(document.getElementById("idle-gap-sec").value || "1.2");
   const segmentFrameStep = Number(document.getElementById("segment-frame-step").value || "2");
   const trackingFrameStep = Number(document.getElementById("tracking-frame-step").value || "4");
+  const cvWorkers = cvWorkersRaw ? Number(cvWorkersRaw) : null;
+  const maxVideoMinutes = maxVideoMinutesRaw ? Number(maxVideoMinutesRaw) : null;
 
   if (mode === "upload" && (!fileInput.files || fileInput.files.length === 0)) {
     setLoading(false, "Select a video file to upload.");
@@ -238,6 +993,8 @@ async function submitAnalyze(event) {
       body.append("file", fileInput.files[0]);
       body.append("include_llm", includeLlm ? "true" : "false");
       body.append("llm_model", llmModel);
+      body.append("player_a_name", playerAName);
+      body.append("player_b_name", playerBName);
       if (openaiApiKey) {
         body.append("openai_api_key", openaiApiKey);
       }
@@ -246,6 +1003,12 @@ async function submitAnalyze(event) {
       body.append("idle_gap_sec", String(idleGapSec));
       body.append("segment_frame_step", String(segmentFrameStep));
       body.append("tracking_frame_step", String(trackingFrameStep));
+      if (cvWorkers !== null && Number.isFinite(cvWorkers) && cvWorkers > 0) {
+        body.append("cv_workers", String(Math.round(cvWorkers)));
+      }
+      if (maxVideoMinutes !== null && Number.isFinite(maxVideoMinutes) && maxVideoMinutes > 0) {
+        body.append("max_video_minutes", String(maxVideoMinutes));
+      }
       if (maxRallies) {
         body.append("max_rallies", maxRallies);
       }
@@ -258,12 +1021,20 @@ async function submitAnalyze(event) {
         video_path: sourceInput.value.trim(),
         include_llm: includeLlm,
         llm_model: llmModel,
+        player_a_name: playerAName,
+        player_b_name: playerBName,
         motion_threshold: motionThreshold,
         min_rally_sec: minRallySec,
         idle_gap_sec: idleGapSec,
         segment_frame_step: segmentFrameStep,
         tracking_frame_step: trackingFrameStep,
       };
+      if (cvWorkers !== null && Number.isFinite(cvWorkers) && cvWorkers > 0) {
+        body.cv_workers = Math.round(cvWorkers);
+      }
+      if (maxVideoMinutes !== null && Number.isFinite(maxVideoMinutes) && maxVideoMinutes > 0) {
+        body.max_video_minutes = maxVideoMinutes;
+      }
       if (openaiApiKey) {
         body.openai_api_key = openaiApiKey;
       }
@@ -350,10 +1121,10 @@ function renderMovementCards(movement) {
   clearChildren(movementCards);
 
   const items = [
-    ["A Avg T Recovery", movement.A_avg_T_recovery_sec, "s"],
-    ["B Avg T Recovery", movement.B_avg_T_recovery_sec, "s"],
-    ["A T Occupancy", movement.A_T_occupancy, "%"],
-    ["B T Occupancy", movement.B_T_occupancy, "%"],
+    [`${playerNames.A} Avg T Recovery`, movement.A_avg_T_recovery_sec, "s"],
+    [`${playerNames.B} Avg T Recovery`, movement.B_avg_T_recovery_sec, "s"],
+    [`${playerNames.A} T Occupancy`, movement.A_T_occupancy, "%"],
+    [`${playerNames.B} T Occupancy`, movement.B_T_occupancy, "%"],
   ];
 
   for (const [label, value, unit] of items) {
@@ -465,54 +1236,57 @@ function buildRallyChart(rallies) {
   rallyChart.innerHTML = svg;
 }
 
-function renderRallies(rallies) {
+function renderRallies(rallies, options = {}) {
   clearChildren(rallyList);
 
   if (!rallies.length) {
     const empty = document.createElement("p");
-    empty.textContent = "No rally segments were detected from this video.";
+    const message =
+      typeof options.emptyMessage === "string" && options.emptyMessage.trim()
+        ? options.emptyMessage.trim()
+        : "No rally segments were detected from this video.";
+    empty.textContent = message;
     empty.className = "rally-empty";
     rallyList.appendChild(empty);
     return;
   }
 
-  for (const rally of rallies) {
+  for (const [index, rally] of rallies.entries()) {
     const node = rallyTemplate.content.firstElementChild.cloneNode(true);
+    node.classList.add(`burst-${index % 3}`);
+    node.dataset.rallyId = String(rally.rally_id);
 
     const start = fmt(rally.start_time, 1);
     const end = fmt(rally.end_time, 1);
 
-    node.querySelector(".rally-title").textContent = `Rally ${rally.rally_id}`;
-    node.querySelector(".rally-meta").textContent = `${start}s -> ${end}s | ${fmt(
-      rally.duration_sec,
-      1
-    )}s`;
-    node.querySelector(".rally-outcome").textContent = rally.outcome || "Outcome unknown";
+    const rankingTag = `<span class="rally-rank">#${index + 1}</span> `;
+    node.querySelector(".rally-title").innerHTML = `${rankingTag}Rally ${escapeHtml(String(rally.rally_id))}`;
+    node.querySelector(".rally-meta").textContent = `${start}s -> ${end}s`;
+    node.querySelector(".rally-outcome").textContent = formatOutcomeText(rally.outcome);
 
     const strip = node.querySelector(".shot-strip");
     const shots = Array.isArray(rally.shots) ? rally.shots : [];
-    if (!shots.length) {
+    const shotSummary = summarizeShotTypes(shots);
+    if (!shotSummary.length) {
       const noShots = document.createElement("span");
       noShots.className = "shot-pill";
-      noShots.textContent = "No shots inferred";
+      noShots.textContent = "No shot profile";
       strip.appendChild(noShots);
     } else {
-      for (const shot of shots) {
+      for (const item of shotSummary) {
         const pill = document.createElement("span");
-        const label = shot.player || "Unknown";
-        const side = shot.side ? ` ${shot.side}` : "";
-        pill.className = `shot-pill ${String(label).toLowerCase()}`;
-        pill.textContent = `${label}: ${shot.type || "shot"}${side}`;
+        pill.className = "shot-pill summary";
+        pill.textContent = item;
         strip.appendChild(pill);
       }
     }
 
     const metrics = node.querySelector(".rally-metrics");
     const tags = [
-      `A T recover: ${rally.positions?.A_avg_T_recovery_sec ? `${fmt(rally.positions.A_avg_T_recovery_sec)}s` : "n/a"}`,
-      `B T recover: ${rally.positions?.B_avg_T_recovery_sec ? `${fmt(rally.positions.B_avg_T_recovery_sec)}s` : "n/a"}`,
-      `A T occ: ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
-      `B T occ: ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
+      `${fmt(rally.duration_sec, 1)}s`,
+      `${rallyShotsCount(rally)} shots`,
+      `${playerNames.A} T ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
+      `${playerNames.B} T ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
     ];
     for (const tagText of tags) {
       const tag = document.createElement("span");
@@ -521,8 +1295,14 @@ function renderRallies(rallies) {
       metrics.appendChild(tag);
     }
 
+    node.addEventListener("click", () => {
+      selectRally(rally);
+    });
+
     rallyList.appendChild(node);
   }
+
+  highlightActiveRallyCard();
 }
 
 function renderInsight(insight) {
@@ -532,43 +1312,80 @@ function renderInsight(insight) {
   }
 
   insightPanel.classList.remove("hidden");
-  insightModel.textContent = `${insight.model || "model-unknown"} | confidence: ${
-    insight.confidence || "n/a"
-  }`;
+  const confidence = insight.confidence || "n/a";
+  insightModel.textContent = `${insight.model || "model-unknown"} | confidence: ${confidence}`;
 
-  insightBody.innerHTML = markdownToHtml(insight.report_markdown || "");
+  clearChildren(insightSummaryCards);
+  const summaryCards = [
+    { label: "Confidence", value: confidence },
+    { label: "Pattern Count", value: String((insight.key_patterns || []).length) },
+    { label: "Drill Count", value: String((insight.drills || []).length) },
+  ];
+  for (const card of summaryCards) {
+    const el = document.createElement("div");
+    el.className = "insight-summary-card";
+    el.innerHTML = `
+      <p class="insight-summary-label">${escapeHtml(card.label)}</p>
+      <p class="insight-summary-value">${escapeHtml(card.value)}</p>
+    `;
+    insightSummaryCards.appendChild(el);
+  }
+
+  renderReportCards(withNamedPlayers(insight.report_markdown || ""));
 
   clearChildren(patternList);
   const patterns = Array.isArray(insight.key_patterns) ? insight.key_patterns : [];
   if (!patterns.length) {
-    const li = document.createElement("li");
-    li.textContent = "No recurring patterns returned.";
-    patternList.appendChild(li);
+    const card = document.createElement("article");
+    card.className = "insight-item-card empty";
+    card.textContent = "No recurring patterns returned.";
+    patternList.appendChild(card);
   } else {
-    for (const item of patterns) {
-      const li = document.createElement("li");
-      li.textContent = item;
-      patternList.appendChild(li);
+    for (const [idx, item] of patterns.entries()) {
+      const normalized = withNamedPlayers(normalizeInsightItem(item));
+      const card = document.createElement("article");
+      card.className = "insight-item-card pattern";
+      card.innerHTML = `
+        <div class="insight-item-copy">
+          <p class="insight-item-index">Pattern ${idx + 1}</p>
+          <p class="insight-item-text">${escapeHtml(normalized)}</p>
+        </div>
+      `;
+      patternList.appendChild(card);
     }
   }
 
   clearChildren(drillList);
   const drills = Array.isArray(insight.drills) ? insight.drills : [];
   if (!drills.length) {
-    const li = document.createElement("li");
-    li.textContent = "No drills returned.";
-    drillList.appendChild(li);
+    const card = document.createElement("article");
+    card.className = "insight-item-card empty";
+    card.textContent = "No drills returned.";
+    drillList.appendChild(card);
   } else {
-    for (const item of drills) {
-      const li = document.createElement("li");
-      li.textContent = item;
-      drillList.appendChild(li);
+    for (const [idx, item] of drills.entries()) {
+      const normalized = withNamedPlayers(normalizeInsightItem(item));
+      const drillType = classifyDrillType(normalized);
+      const card = document.createElement("article");
+      card.className = "insight-item-card";
+      card.innerHTML = `
+        <span class="drill-icon ${escapeHtml(drillType)}">${drillIconSvg(drillType)}</span>
+        <div class="insight-item-copy">
+          <p class="insight-item-index">Drill ${idx + 1}</p>
+          <p class="insight-item-text">${escapeHtml(normalized)}</p>
+        </div>
+      `;
+      drillList.appendChild(card);
     }
   }
 }
 
 function renderAll(data) {
+  currentResult = data;
+  updatePlayerNamesFromInputs();
+  refreshWinnerFilterLabels();
   const timeline = data.timeline || { rallies: [], tactical_patterns: {}, movement_summary: {} };
+  const rallies = Array.isArray(timeline.rallies) ? timeline.rallies : [];
   const tactical = timeline.tactical_patterns || {};
   const movement = timeline.movement_summary || {};
 
@@ -576,18 +1393,167 @@ function renderAll(data) {
   renderKpis(timeline);
   renderTacticalBars(tactical);
   renderMovementCards(movement);
-  buildRallyChart(Array.isArray(timeline.rallies) ? timeline.rallies : []);
-  renderRallies(Array.isArray(timeline.rallies) ? timeline.rallies : []);
+  buildRallyChart(rallies);
+  allRallies = [...rallies];
+  if (winnerFilter) {
+    winnerFilter.value = "all";
+  }
+  if (durationMinInput) {
+    durationMinInput.value = "";
+  }
+  if (durationMaxInput) {
+    durationMaxInput.value = "";
+  }
+  if (shotsMinInput) {
+    shotsMinInput.value = "";
+  }
+  if (shotsMaxInput) {
+    shotsMaxInput.value = "";
+  }
+  if (rallySort) {
+    rallySort.value = rallySort.value || "match";
+  }
+  applyRallySortRender();
+  if (rallyPicker) {
+    rallyPicker.value = "";
+    rallyPicker.min = "1";
+    rallyPicker.max = String(rallies.length || 1);
+  }
+  setupReviewPanel(data, displayedRallies);
   renderInsight(data.insight || null);
 
   rawJson.textContent = JSON.stringify(data, null, 2);
   resultsEl.classList.remove("hidden");
 }
 
+rallyScrubber.addEventListener("input", () => {
+  if (!activeRally) {
+    return;
+  }
+  const start = Number(activeRally.start_time || 0);
+  const duration = rallyDuration(activeRally);
+  const ratio = Number(rallyScrubber.value || 0) / 1000;
+  const target = start + ratio * duration;
+  reviewTimeSync = true;
+  reviewVideo.currentTime = target;
+  drawReviewFrame();
+  updateShotCaption();
+  reviewTimeSync = false;
+});
+
+reviewVideo.addEventListener("loadedmetadata", () => {
+  if (activeRally) {
+    reviewVideo.currentTime = Number(activeRally.start_time || 0);
+  }
+  drawReviewFrame();
+  updateShotCaption();
+});
+
+reviewVideo.addEventListener("play", () => {
+  stopReviewLoop();
+  drawReviewFrame();
+});
+
+reviewVideo.addEventListener("pause", () => {
+  stopReviewLoop();
+  drawReviewFrame();
+});
+
+reviewVideo.addEventListener("seeked", () => {
+  drawReviewFrame();
+  updateShotCaption();
+});
+
+reviewVideo.addEventListener("timeupdate", () => {
+  if (!activeRally) {
+    return;
+  }
+  const start = Number(activeRally.start_time || 0);
+  const end = Number(activeRally.end_time || 0);
+  const current = Number(reviewVideo.currentTime || 0);
+
+  if (current > end) {
+    reviewVideo.pause();
+    reviewVideo.currentTime = end;
+  }
+
+  if (!reviewTimeSync) {
+    const ratio = clamp((current - start) / rallyDuration(activeRally), 0, 1);
+    rallyScrubber.value = String(Math.round(ratio * 1000));
+  }
+  updateShotCaption();
+});
+
 for (const radio of modeRadios) {
   radio.addEventListener("change", () => {
     setMode(activeMode());
   });
+}
+
+if (rallySort) {
+  rallySort.addEventListener("change", () => {
+    applyRallySortRender();
+    if (displayedRallies.length > 0) {
+      selectRally(displayedRallies[0]);
+    }
+  });
+}
+
+function onRallyFilterChange() {
+  applyRallySortRender();
+  if (displayedRallies.length > 0) {
+    selectRally(displayedRallies[0]);
+  }
+}
+
+for (const input of [winnerFilter, durationMinInput, durationMaxInput, shotsMinInput, shotsMaxInput]) {
+  if (!input) {
+    continue;
+  }
+  input.addEventListener("change", onRallyFilterChange);
+}
+
+for (const input of [durationMinInput, durationMaxInput, shotsMinInput, shotsMaxInput]) {
+  if (!input) {
+    continue;
+  }
+  input.addEventListener("input", onRallyFilterChange);
+}
+
+function submitRallyPick() {
+  const value = Number(rallyPicker?.value || 0);
+  if (!value) {
+    rallyToolbarStatus.textContent = "Enter a rally number to jump.";
+    return;
+  }
+  jumpToRallyById(value);
+}
+
+if (rallyPickerBtn) {
+  rallyPickerBtn.addEventListener("click", submitRallyPick);
+}
+
+if (rallyPicker) {
+  rallyPicker.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitRallyPick();
+    }
+  });
+}
+
+function rerenderWithCurrentResult() {
+  if (!currentResult) {
+    return;
+  }
+  renderAll(currentResult);
+}
+
+if (playerANameInput) {
+  playerANameInput.addEventListener("change", rerenderWithCurrentResult);
+}
+if (playerBNameInput) {
+  playerBNameInput.addEventListener("change", rerenderWithCurrentResult);
 }
 
 setMode(activeMode());

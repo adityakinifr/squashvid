@@ -73,6 +73,16 @@
             </div>
 
             <div class="field-group compact">
+              <label for="player-a-name">Player A Name</label>
+              <input id="player-a-name" name="player_a_name" type="text" value="Player A" />
+            </div>
+
+            <div class="field-group compact">
+              <label for="player-b-name">Player B Name</label>
+              <input id="player-b-name" name="player_b_name" type="text" value="Player B" />
+            </div>
+
+            <div class="field-group compact">
               <label for="openai-api-key">OpenAI API Key (optional)</label>
               <input
                 id="openai-api-key"
@@ -116,6 +126,14 @@
               <div class="field-group compact">
                 <label for="tracking-frame-step">Tracking Frame Step</label>
                 <input id="tracking-frame-step" type="number" min="1" max="12" step="1" value="4" />
+              </div>
+              <div class="field-group compact">
+                <label for="cv-workers">CV Worker Processes (optional)</label>
+                <input id="cv-workers" type="number" min="1" max="128" step="1" placeholder="auto = all cores" />
+              </div>
+              <div class="field-group compact">
+                <label for="max-video-minutes">Analyze First X Minutes (optional)</label>
+                <input id="max-video-minutes" type="number" min="0.1" max="240" step="0.1" placeholder="full video" />
               </div>
             </div>
           </details>
@@ -166,28 +184,96 @@
             <h2>Rally Timeline</h2>
             <p>Shot sequence, movement, and outcome by rally</p>
           </div>
+          <div class="rally-toolbar">
+            <div class="rally-sort-group">
+              <label for="rally-sort">Sort</label>
+              <select id="rally-sort">
+                <option value="match">Match Order</option>
+                <option value="longest">Longest Rally</option>
+                <option value="shortest">Shortest Rally</option>
+                <option value="most_shots">Most Shots</option>
+              </select>
+            </div>
+            <div class="rally-filter-group">
+              <label for="winner-filter">Winner</label>
+              <select id="winner-filter">
+                <option value="all">All Winners</option>
+                <option value="A">Player A Wins</option>
+                <option value="B">Player B Wins</option>
+                <option value="unknown">Unknown/Other</option>
+              </select>
+            </div>
+            <div class="rally-filter-group">
+              <label>Rally Length (s)</label>
+              <div class="range-row">
+                <input id="duration-min" type="number" min="0" step="0.1" placeholder="min" />
+                <span>to</span>
+                <input id="duration-max" type="number" min="0" step="0.1" placeholder="max" />
+              </div>
+            </div>
+            <div class="rally-filter-group">
+              <label>Shots</label>
+              <div class="range-row">
+                <input id="shots-min" type="number" min="0" step="1" placeholder="min" />
+                <span>to</span>
+                <input id="shots-max" type="number" min="0" step="1" placeholder="max" />
+              </div>
+            </div>
+            <div class="rally-picker-group">
+              <label for="rally-picker">Pick Rally #</label>
+              <div class="picker-row">
+                <input id="rally-picker" type="number" min="1" placeholder="e.g. 12" />
+                <button id="rally-picker-btn" type="button" class="secondary">Go</button>
+              </div>
+            </div>
+            <p id="rally-toolbar-status" class="rally-toolbar-status"></p>
+          </div>
+          <div id="review-panel" class="review-inline hidden">
+            <div class="panel-head">
+              <h3>Rally Review Scrubber</h3>
+              <p id="review-meta">Select a rally card to inspect the cropped view.</p>
+            </div>
+            <div class="review-stage">
+              <canvas id="review-canvas" width="960" height="540"></canvas>
+              <video id="review-video" class="hidden" playsinline preload="metadata"></video>
+            </div>
+            <div class="scrubber-wrap">
+              <input id="rally-scrubber" type="range" min="0" max="1000" value="0" step="1" />
+              <div id="shot-markers" class="shot-markers"></div>
+            </div>
+            <p id="shot-caption" class="shot-caption"></p>
+            <div class="selected-rally-details">
+              <h3>Selected Rally Details</h3>
+              <div id="selected-rally-kpis" class="selected-rally-kpis"></div>
+              <div id="selected-rally-shots" class="selected-rally-shots"></div>
+            </div>
+          </div>
           <div id="rally-list" class="rally-list"></div>
         </article>
 
-        <article id="insight-panel" class="panel insight reveal hidden" style="--stagger: 6">
+        <article id="insight-panel" class="panel insight reveal hidden" style="--stagger: 7">
           <div class="panel-head">
             <h2>Coaching Insight</h2>
             <p id="insight-model"></p>
           </div>
-          <div id="insight-body" class="insight-body"></div>
-          <div class="insight-columns">
+          <div id="insight-summary-cards" class="insight-summary-cards"></div>
+          <div class="insight-columns insight-cards-layout">
             <div>
               <h3>Recurring Patterns</h3>
-              <ul id="pattern-list"></ul>
+              <div id="pattern-list" class="insight-card-list"></div>
             </div>
             <div>
               <h3>Recommended Drills</h3>
-              <ul id="drill-list"></ul>
+              <div id="drill-list" class="insight-card-list"></div>
             </div>
           </div>
+          <details class="insight-report-details" open>
+            <summary>Full Written Report</summary>
+            <div id="insight-body" class="insight-body"></div>
+          </details>
         </article>
 
-        <article class="panel raw reveal" style="--stagger: 7">
+        <article class="panel raw reveal" style="--stagger: 8">
           <details>
             <summary>Raw JSON</summary>
             <pre id="raw-json"></pre>
