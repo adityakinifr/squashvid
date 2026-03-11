@@ -1411,7 +1411,7 @@ function renderAll(data) {
     shotsMaxInput.value = "";
   }
   if (rallySort) {
-    rallySort.value = rallySort.value || "match";
+    rallySort.value = "match";
   }
   applyRallySortRender();
   if (rallyPicker) {

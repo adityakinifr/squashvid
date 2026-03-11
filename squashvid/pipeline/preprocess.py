@@ -7,6 +7,8 @@ import numpy as np
 
 from squashvid.pipeline.models import Segment
 
+SEGMENTER_VERSION = "adaptive-v3-window-stable"
+
 
 def read_video_metadata(video_path: str) -> dict[str, float | int]:
     path = Path(video_path)
@@ -78,6 +80,51 @@ def _segments_from_motion_samples(
     return segments[:max_rallies] if max_rallies is not None else segments
 
 
+def _merge_close_segments(
+    segments: list[Segment],
+    merge_gap_sec: float,
+    max_rallies: int | None = None,
+) -> list[Segment]:
+    if not segments:
+        return []
+    if merge_gap_sec <= 0:
+        return segments[:max_rallies] if max_rallies is not None else segments
+
+    merged: list[Segment] = [segments[0]]
+    for seg in segments[1:]:
+        prev = merged[-1]
+        gap = seg.start_sec - prev.end_sec
+        if gap <= merge_gap_sec:
+            merged[-1] = Segment(start_sec=prev.start_sec, end_sec=max(prev.end_sec, seg.end_sec))
+        else:
+            merged.append(seg)
+
+    return merged[:max_rallies] if max_rallies is not None else merged
+
+
+def _extend_segment_tails(
+    segments: list[Segment],
+    tail_pad_sec: float,
+    total_duration: float,
+    max_rallies: int | None = None,
+) -> list[Segment]:
+    if not segments:
+        return []
+    if tail_pad_sec <= 0:
+        return segments[:max_rallies] if max_rallies is not None else segments
+
+    padded: list[Segment] = []
+    for idx, seg in enumerate(segments):
+        next_start = segments[idx + 1].start_sec if idx + 1 < len(segments) else total_duration
+        max_end = min(total_duration, next_start)
+        end = min(max_end, seg.end_sec + tail_pad_sec)
+        if end < seg.start_sec:
+            end = seg.end_sec
+        padded.append(Segment(start_sec=seg.start_sec, end_sec=end))
+
+    return padded[:max_rallies] if max_rallies is not None else padded
+
+
 def _adaptive_segments_from_samples(
     motion_samples: list[tuple[float, float]],
     base_threshold: float,
@@ -86,12 +133,40 @@ def _adaptive_segments_from_samples(
     total_duration: float,
     max_rallies: int | None,
 ) -> list[Segment]:
-    if len(motion_samples) < 20:
+    adaptive_threshold = _select_adaptive_threshold(
+        motion_samples=motion_samples,
+        base_threshold=base_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=idle_gap_sec,
+        total_duration=total_duration,
+        max_rallies=max_rallies,
+    )
+    if adaptive_threshold is None:
         return []
+    return _segments_from_motion_samples(
+        motion_samples=motion_samples,
+        threshold=adaptive_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=idle_gap_sec,
+        total_duration=total_duration,
+        max_rallies=max_rallies,
+    )
+
+
+def _select_adaptive_threshold(
+    motion_samples: list[tuple[float, float]],
+    base_threshold: float,
+    min_rally_sec: float,
+    idle_gap_sec: float,
+    total_duration: float,
+    max_rallies: int | None,
+) -> float | None:
+    if len(motion_samples) < 20:
+        return None
 
     ratios = np.array([sample[1] for sample in motion_samples], dtype=float)
     if ratios.size == 0:
-        return []
+        return None
 
     quantile_thresholds = [
         float(np.percentile(ratios, p))
@@ -112,7 +187,7 @@ def _adaptive_segments_from_samples(
 
     threshold_candidates.sort(reverse=True)
 
-    best_segments: list[Segment] = []
+    best_threshold: float | None = None
     best_score = float("-inf")
     long_limit = max(120.0, min(total_duration * 0.8, 240.0))
 
@@ -148,11 +223,22 @@ def _adaptive_segments_from_samples(
 
         if score > best_score:
             best_score = score
-            best_segments = segments
+            best_threshold = threshold
 
-    if len(best_segments) >= 2:
-        return best_segments
-    return []
+    if best_threshold is None:
+        return None
+
+    chosen_segments = _segments_from_motion_samples(
+        motion_samples=motion_samples,
+        threshold=best_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=idle_gap_sec,
+        total_duration=total_duration,
+        max_rallies=max_rallies,
+    )
+    if len(chosen_segments) >= 2:
+        return best_threshold
+    return None
 
 
 def detect_active_segments(
@@ -227,7 +313,7 @@ def detect_active_segments(
         min_rally_sec=min_rally_sec,
         idle_gap_sec=idle_gap_sec,
         total_duration=total_duration,
-        max_rallies=max_rallies,
+        max_rallies=None,
     )
 
     needs_adaptive = False
@@ -237,16 +323,45 @@ def detect_active_segments(
         needs_adaptive = segments[0].duration_sec > max(100.0, total_duration * 0.72)
 
     if needs_adaptive:
-        adaptive_segments = _adaptive_segments_from_samples(
-            motion_samples=motion_samples,
+        adaptive_calibration_sec = min(total_duration, 8.0 * 60.0)
+        calibration_samples = [
+            (ts, ratio) for ts, ratio in motion_samples if ts <= adaptive_calibration_sec
+        ]
+        if not calibration_samples:
+            calibration_samples = motion_samples
+
+        adaptive_threshold = _select_adaptive_threshold(
+            motion_samples=calibration_samples,
             base_threshold=motion_threshold,
             min_rally_sec=min_rally_sec,
             idle_gap_sec=idle_gap_sec,
-            total_duration=total_duration,
-            max_rallies=max_rallies,
+            total_duration=adaptive_calibration_sec,
+            max_rallies=None,
         )
-        if adaptive_segments:
-            segments = adaptive_segments
+        if adaptive_threshold is not None:
+            adaptive_segments = _segments_from_motion_samples(
+                motion_samples=motion_samples,
+                threshold=adaptive_threshold,
+                min_rally_sec=min_rally_sec,
+                idle_gap_sec=idle_gap_sec,
+                total_duration=total_duration,
+                max_rallies=None,
+            )
+            if len(adaptive_segments) >= 2:
+                segments = adaptive_segments
+
+    merge_gap_sec = min(2.4, max(idle_gap_sec * 1.5, idle_gap_sec + 0.5))
+    segments = _merge_close_segments(
+        segments=segments,
+        merge_gap_sec=merge_gap_sec,
+        max_rallies=None,
+    )
+    segments = _extend_segment_tails(
+        segments=segments,
+        tail_pad_sec=min(1.4, idle_gap_sec + 0.2),
+        total_duration=total_duration,
+        max_rallies=None,
+    )
 
     min_full_segment_sec = min(min_rally_sec, 1.0)
     if not segments and total_duration >= min_full_segment_sec:

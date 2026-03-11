@@ -9,7 +9,11 @@ from pathlib import Path
 from squashvid.pipeline.events import aggregate_match, rally_from_track
 from squashvid.pipeline.llm import generate_coaching_insight
 from squashvid.pipeline.models import Segment
-from squashvid.pipeline.preprocess import detect_active_segments, read_video_metadata
+from squashvid.pipeline.preprocess import (
+    SEGMENTER_VERSION,
+    detect_active_segments,
+    read_video_metadata,
+)
 from squashvid.pipeline.video_source import prepare_video_source
 from squashvid.pipeline.vision import track_segment
 from squashvid.schemas import AnalysisResult, AnalyzeOptions, CoachingInsight, RallySummary
@@ -29,6 +33,18 @@ def _resolve_cv_workers(requested_workers: int | None, segment_count: int) -> in
     if requested_workers is None:
         return max(1, min(os.cpu_count() or 1, segment_count))
     return max(1, min(int(requested_workers), segment_count))
+
+
+def _can_use_process_pool() -> bool:
+    try:
+        import __main__
+
+        main_file = str(getattr(__main__, "__file__", "") or "")
+        if not main_file or main_file.startswith("<"):
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def _track_rally_payload(
@@ -65,7 +81,7 @@ def _build_rallies(
         return [], 1
 
     worker_count = _resolve_cv_workers(cv_workers, len(segments))
-    if worker_count <= 1:
+    if worker_count <= 1 or not _can_use_process_pool():
         rallies: list[RallySummary] = []
         for idx, segment in enumerate(segments, start=1):
             track = track_segment(
@@ -165,6 +181,7 @@ def analyze_video_execution(
         frame_count=effective_frame_count,
         rallies=rallies,
     )
+    timeline.notes.append(f"Segmentation engine: {SEGMENTER_VERSION}.")
     if video_source.downloaded:
         title_info = f" ({video_source.title})" if video_source.title else ""
         timeline.notes.append(

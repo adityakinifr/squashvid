@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from squashvid.pipeline.video_source import is_url
+from squashvid.pipeline.preprocess import SEGMENTER_VERSION
 from squashvid.schemas import AnalysisResult, AnalyzeOptions, AnalyzeRequest
 
 app = FastAPI(title="SquashVid Analyzer", version="0.1.0")
@@ -73,7 +74,7 @@ def media_file(token: str) -> FileResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "segmenter_version": SEGMENTER_VERSION}
 
 
 @app.post("/analyze/path", response_model=AnalysisResult)

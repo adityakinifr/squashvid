@@ -109,3 +109,24 @@ def test_adaptive_segments_can_recover_when_base_threshold_is_too_high() -> None
         max_rallies=None,
     )
     assert len(adaptive) >= 2
+
+
+def test_merge_close_segments_and_tail_extension() -> None:
+    base = [
+        preprocess.Segment(start_sec=0.4, end_sec=23.0),
+        preprocess.Segment(start_sec=24.6, end_sec=32.6),
+        preprocess.Segment(start_sec=40.7, end_sec=62.3),
+    ]
+    merged = preprocess._merge_close_segments(base, merge_gap_sec=1.8)
+    assert len(merged) == 2
+    assert merged[0].start_sec == 0.4
+    assert merged[0].end_sec == 32.6
+
+    padded = preprocess._extend_segment_tails(
+        merged,
+        tail_pad_sec=1.4,
+        total_duration=120.0,
+    )
+    assert round(padded[0].end_sec, 2) == 34.0
+    # Extension must not cross into next segment.
+    assert padded[0].end_sec <= padded[1].start_sec
