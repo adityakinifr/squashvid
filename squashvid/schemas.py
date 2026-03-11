@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class PlayerLabel(str, Enum):
+    A = "A"
+    B = "B"
+    UNKNOWN = "Unknown"
+
+
+class ShotEvent(BaseModel):
+    timestamp: float = Field(..., ge=0)
+    player: PlayerLabel = PlayerLabel.UNKNOWN
+    type: str = "unknown"
+    side: str | None = None
+    quality: str | None = None
+    length: str | None = None
+    result: str | None = None
+
+
+class RallyPositions(BaseModel):
+    A_avg_T_recovery_sec: float | None = None
+    B_avg_T_recovery_sec: float | None = None
+    A_T_occupancy: float | None = None
+    B_T_occupancy: float | None = None
+    A_court_coverage: float | None = None
+    B_court_coverage: float | None = None
+
+
+class RallySummary(BaseModel):
+    rally_id: int
+    start_time: float
+    end_time: float
+    duration_sec: float
+    shots: list[ShotEvent] = Field(default_factory=list)
+    positions: RallyPositions = Field(default_factory=RallyPositions)
+    outcome: str = "unknown"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MatchTimeline(BaseModel):
+    video_path: str
+    fps: float
+    frame_count: int
+    rallies: list[RallySummary] = Field(default_factory=list)
+    tactical_patterns: dict[str, float] = Field(default_factory=dict)
+    movement_summary: dict[str, float] = Field(default_factory=dict)
+    notes: list[str] = Field(default_factory=list)
+
+
+class CoachingInsight(BaseModel):
+    model: str
+    report_markdown: str
+    key_patterns: list[str] = Field(default_factory=list)
+    drills: list[str] = Field(default_factory=list)
+    confidence: str = "medium"
+
+
+class AnalysisResult(BaseModel):
+    timeline: MatchTimeline
+    insight: CoachingInsight | None = None
+
+
+class AnalyzeRequest(BaseModel):
+    video_path: str
+    include_llm: bool = True
+    llm_model: str = "gpt-4.1-mini"
+    openai_api_key: str | None = None
+    motion_threshold: float = Field(default=0.018, ge=0.001, le=0.5)
+    min_rally_sec: float = Field(default=4.0, ge=1.0, le=120.0)
+    idle_gap_sec: float = Field(default=1.2, ge=0.1, le=15.0)
+    max_rallies: int | None = Field(default=None, ge=1)
+    segment_frame_step: int = Field(default=2, ge=1, le=12)
+    tracking_frame_step: int = Field(default=4, ge=1, le=12)
+    youtube_cache_dir: str | None = None
+
+
+class AnalyzeOptions(BaseModel):
+    include_llm: bool = True
+    llm_model: str = "gpt-4.1-mini"
+    openai_api_key: str | None = None
+    motion_threshold: float = Field(default=0.018, ge=0.001, le=0.5)
+    min_rally_sec: float = Field(default=4.0, ge=1.0, le=120.0)
+    idle_gap_sec: float = Field(default=1.2, ge=0.1, le=15.0)
+    max_rallies: int | None = Field(default=None, ge=1)
+    segment_frame_step: int = Field(default=2, ge=1, le=12)
+    tracking_frame_step: int = Field(default=4, ge=1, le=12)
+    youtube_cache_dir: str | None = None

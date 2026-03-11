@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "squashvid"
+version = "0.1.0"
+description = "Hybrid CV + LLM squash video analyzer"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "SquashVid" }
+]
+dependencies = [
+  "fastapi>=0.116.0",
+  "numpy>=1.26.0,<2.0.0",
+  "opencv-python>=4.10.0.84",
+  "openai>=1.51.0",
+  "pydantic>=2.9.0",
+  "python-multipart>=0.0.12",
+  "yt-dlp>=2025.2.19",
+  "uvicorn[standard]>=0.31.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0"
+]
+
+[project.scripts]
+squashvid = "squashvid.cli:main"
+squashvid-api = "squashvid.api:main"
+
+[tool.setuptools]
+packages = ["squashvid", "squashvid.pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

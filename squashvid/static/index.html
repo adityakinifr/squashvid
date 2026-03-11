@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SquashVid Analyzer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="glow glow-1" aria-hidden="true"></div>
+    <div class="glow glow-2" aria-hidden="true"></div>
+
+    <main class="layout">
+      <header class="hero reveal" style="--stagger: 0">
+        <p class="badge">CV + LLM Match Intel</p>
+        <h1>SquashVid</h1>
+        <p class="subtitle">
+          Upload a match clip, paste a local path, or analyze straight from YouTube.
+          Get rally-level breakdowns, tactical trends, and coaching actions in one
+          visual report.
+        </p>
+      </header>
+
+      <section class="panel controls reveal" style="--stagger: 1" aria-label="Analyze video">
+        <form id="analyze-form" novalidate>
+          <div class="mode-row" role="radiogroup" aria-label="Video source type">
+            <label class="mode-pill">
+              <input type="radio" name="source_mode" value="youtube" checked />
+              <span>YouTube URL</span>
+            </label>
+            <label class="mode-pill">
+              <input type="radio" name="source_mode" value="path" />
+              <span>Local Path</span>
+            </label>
+            <label class="mode-pill">
+              <input type="radio" name="source_mode" value="upload" />
+              <span>Upload File</span>
+            </label>
+          </div>
+
+          <div id="path-group" class="field-group">
+            <label for="source-input">Video Path or URL</label>
+            <input
+              id="source-input"
+              name="source_input"
+              type="text"
+              value="https://www.youtube.com/watch?v=VIDEO_ID"
+              autocomplete="off"
+            />
+          </div>
+
+          <div id="upload-group" class="field-group hidden">
+            <label for="video-file">Video File</label>
+            <input id="video-file" name="video_file" type="file" accept="video/*" />
+          </div>
+
+          <div class="settings-grid">
+            <label class="toggle">
+              <input id="include-llm" name="include_llm" type="checkbox" checked />
+              <span>Include LLM Coaching Layer</span>
+            </label>
+
+            <div class="field-group compact">
+              <label for="llm-model">LLM Model</label>
+              <input id="llm-model" name="llm_model" type="text" value="gpt-4.1-mini" />
+            </div>
+
+            <div class="field-group compact">
+              <label for="openai-api-key">OpenAI API Key (optional)</label>
+              <input
+                id="openai-api-key"
+                name="openai_api_key"
+                type="password"
+                autocomplete="off"
+                placeholder="sk-..."
+              />
+            </div>
+
+            <div class="field-group compact">
+              <label for="max-rallies">Max Rallies (optional)</label>
+              <input id="max-rallies" name="max_rallies" type="number" min="1" value="24" />
+            </div>
+
+            <div class="field-group compact">
+              <label for="youtube-cache">YouTube Cache Dir (optional)</label>
+              <input id="youtube-cache" name="youtube_cache_dir" type="text" placeholder="/tmp/squashvid_cache" />
+            </div>
+          </div>
+
+          <details class="advanced">
+            <summary>Advanced CV Thresholds</summary>
+            <div class="settings-grid advanced-grid">
+              <div class="field-group compact">
+                <label for="motion-threshold">Motion Threshold</label>
+                <input id="motion-threshold" type="number" step="0.001" value="0.018" />
+              </div>
+              <div class="field-group compact">
+                <label for="min-rally-sec">Min Rally Seconds</label>
+                <input id="min-rally-sec" type="number" step="0.1" value="4.0" />
+              </div>
+              <div class="field-group compact">
+                <label for="idle-gap-sec">Idle Gap Seconds</label>
+                <input id="idle-gap-sec" type="number" step="0.1" value="1.2" />
+              </div>
+              <div class="field-group compact">
+                <label for="segment-frame-step">Segment Frame Step</label>
+                <input id="segment-frame-step" type="number" min="1" max="12" step="1" value="2" />
+              </div>
+              <div class="field-group compact">
+                <label for="tracking-frame-step">Tracking Frame Step</label>
+                <input id="tracking-frame-step" type="number" min="1" max="12" step="1" value="4" />
+              </div>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button id="analyze-btn" class="primary" type="submit">Analyze Match</button>
+            <p id="status-text" role="status" aria-live="polite"></p>
+          </div>
+        </form>
+      </section>
+
+      <section id="results" class="results hidden" aria-live="polite">
+        <article class="panel summary reveal" style="--stagger: 2">
+          <div class="panel-head">
+            <h2>Match Snapshot</h2>
+            <p id="source-label"></p>
+          </div>
+          <div id="kpi-grid" class="kpi-grid"></div>
+        </article>
+
+        <article class="panel analytics reveal" style="--stagger: 3">
+          <div class="panel-head">
+            <h2>Tactics and Movement</h2>
+            <p>Pattern mix and court-control indicators</p>
+          </div>
+          <div class="analytics-grid">
+            <div>
+              <h3>Tactical Rates</h3>
+              <div id="tactical-bars" class="metric-bars"></div>
+            </div>
+            <div>
+              <h3>Movement Profile</h3>
+              <div id="movement-cards" class="movement-cards"></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel chart reveal" style="--stagger: 4">
+          <div class="panel-head">
+            <h2>Rally Flow</h2>
+            <p>Duration and shot count per rally</p>
+          </div>
+          <div id="rally-chart" class="chart-wrap"></div>
+        </article>
+
+        <article class="panel rallies reveal" style="--stagger: 5">
+          <div class="panel-head">
+            <h2>Rally Timeline</h2>
+            <p>Shot sequence, movement, and outcome by rally</p>
+          </div>
+          <div id="rally-list" class="rally-list"></div>
+        </article>
+
+        <article id="insight-panel" class="panel insight reveal hidden" style="--stagger: 6">
+          <div class="panel-head">
+            <h2>Coaching Insight</h2>
+            <p id="insight-model"></p>
+          </div>
+          <div id="insight-body" class="insight-body"></div>
+          <div class="insight-columns">
+            <div>
+              <h3>Recurring Patterns</h3>
+              <ul id="pattern-list"></ul>
+            </div>
+            <div>
+              <h3>Recommended Drills</h3>
+              <ul id="drill-list"></ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel raw reveal" style="--stagger: 7">
+          <details>
+            <summary>Raw JSON</summary>
+            <pre id="raw-json"></pre>
+          </details>
+        </article>
+      </section>
+    </main>
+
+    <template id="kpi-template">
+      <div class="kpi-card">
+        <p class="kpi-label"></p>
+        <p class="kpi-value"></p>
+      </div>
+    </template>
+
+    <template id="bar-template">
+      <div class="metric-row">
+        <div class="metric-head">
+          <span class="metric-label"></span>
+          <span class="metric-value"></span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill"></div>
+        </div>
+      </div>
+    </template>
+
+    <template id="movement-template">
+      <div class="movement-card">
+        <p class="movement-label"></p>
+        <p class="movement-value"></p>
+      </div>
+    </template>
+
+    <template id="rally-template">
+      <article class="rally-card">
+        <header>
+          <h3 class="rally-title"></h3>
+          <p class="rally-meta"></p>
+        </header>
+        <p class="rally-outcome"></p>
+        <div class="shot-strip"></div>
+        <div class="rally-metrics"></div>
+      </article>
+    </template>
+
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

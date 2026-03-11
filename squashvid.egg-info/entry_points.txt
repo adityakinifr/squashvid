@@ -1,0 +1,3 @@
+[console_scripts]
+squashvid = squashvid.cli:main
+squashvid-api = squashvid.api:main
