@@ -1,0 +1,34 @@
+# Cache directories
+.squashvid_cache/
+.fastembed_cache/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.part
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Egg info
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# API keys directory (if any)
+sk-proj-*/
