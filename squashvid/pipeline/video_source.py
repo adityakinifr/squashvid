@@ -16,11 +16,14 @@ def _get_cookies_content_from_env() -> str | None:
     """Get cookie content from environment variables (base64 or plain text)."""
     # Check for base64 encoded cookies first (YOUTUBE_COOKIES_B64 or YTDLP_COOKIES_B64)
     b64_content = os.environ.get("YOUTUBE_COOKIES_B64") or os.environ.get("YTDLP_COOKIES_B64")
+    print(f"[yt-dlp debug] YOUTUBE_COOKIES_B64 present: {bool(os.environ.get('YOUTUBE_COOKIES_B64'))}")
     if b64_content:
         try:
-            return base64.b64decode(b64_content).decode("utf-8")
-        except Exception:
-            pass
+            decoded = base64.b64decode(b64_content).decode("utf-8")
+            print(f"[yt-dlp debug] decoded cookies length: {len(decoded)}")
+            return decoded
+        except Exception as e:
+            print(f"[yt-dlp debug] base64 decode error: {e}")
 
     # Fall back to plain text cookies
     return os.environ.get("YTDLP_COOKIES")
@@ -119,14 +122,18 @@ def _download_youtube_video(
         else:
             # Check for cookie content in env vars (base64 or plain text)
             cookies_content = _get_cookies_content_from_env()
+            print(f"[yt-dlp debug] cookies_content found: {cookies_content is not None}, length: {len(cookies_content) if cookies_content else 0}")
             if cookies_content:
                 global _cookies_temp_file
                 if _cookies_temp_file is None:
                     fd, _cookies_temp_file = tempfile.mkstemp(suffix=".txt", prefix="ytdlp_cookies_")
                     os.write(fd, cookies_content.encode("utf-8"))
                     os.close(fd)
+                    print(f"[yt-dlp debug] wrote cookies to temp file: {_cookies_temp_file}")
                     atexit.register(lambda: os.unlink(_cookies_temp_file) if os.path.exists(_cookies_temp_file) else None)
                 effective_cookies = _cookies_temp_file
+
+    print(f"[yt-dlp debug] effective_cookies: {effective_cookies}")
 
     outtmpl = str(cache_root / "%(id)s.%(ext)s")
     ydl_opts: dict = {
