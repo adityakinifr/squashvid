@@ -103,6 +103,8 @@ async def analyze_path(request: AnalyzeRequest) -> AnalysisResult:
         cv_workers=request.cv_workers,
         max_video_minutes=request.max_video_minutes,
         youtube_cache_dir=request.youtube_cache_dir,
+        youtube_cookies_file=request.youtube_cookies_file,
+        youtube_oauth2=request.youtube_oauth2,
     )
     try:
         execution = await run_in_threadpool(analyze_video_execution, source, options)
@@ -136,6 +138,8 @@ async def analyze_upload(
     cv_workers: int | None = Form(None, ge=1, le=128),
     max_video_minutes: float | None = Form(None, gt=0.05, le=240.0),
     youtube_cache_dir: str | None = Form(None),
+    youtube_cookies_file: str | None = Form(None),
+    youtube_oauth2: bool = Form(False),
 ) -> AnalysisResult:
     from squashvid.pipeline.orchestrator import analyze_video_execution
 
@@ -162,6 +166,8 @@ async def analyze_upload(
             cv_workers=cv_workers,
             max_video_minutes=max_video_minutes,
             youtube_cache_dir=youtube_cache_dir,
+            youtube_cookies_file=youtube_cookies_file,
+            youtube_oauth2=youtube_oauth2,
         )
         execution = await run_in_threadpool(analyze_video_execution, str(tmp_path), options)
         execution.result.source_video_url = _register_media_file(

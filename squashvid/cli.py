@@ -5,7 +5,13 @@ import json
 from pathlib import Path
 
 from squashvid.pipeline.orchestrator import analyze_video
+from squashvid.pipeline.video_source import setup_youtube_oauth
 from squashvid.schemas import AnalyzeOptions
+
+
+def _youtube_auth(_args: argparse.Namespace) -> int:
+    success = setup_youtube_oauth()
+    return 0 if success else 1
 
 
 def _analyze(args: argparse.Namespace) -> int:
@@ -23,6 +29,8 @@ def _analyze(args: argparse.Namespace) -> int:
         cv_workers=args.cv_workers,
         max_video_minutes=args.max_video_minutes,
         youtube_cache_dir=args.youtube_cache_dir,
+        youtube_cookies_file=args.youtube_cookies_file,
+        youtube_oauth2=args.youtube_oauth2,
     )
 
     result = analyze_video(args.video, options)
@@ -131,7 +139,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional cache directory for downloaded YouTube videos",
     )
+    analyze_parser.add_argument(
+        "--youtube-cookies-file",
+        default=None,
+        help="Path to Netscape-format cookies.txt for YouTube authentication (or set YTDLP_COOKIES_FILE env var)",
+    )
+    analyze_parser.add_argument(
+        "--youtube-oauth2",
+        action="store_true",
+        help="Use OAuth2 for YouTube authentication (run 'youtube-auth' first, or set YTDLP_USE_OAUTH2=1)",
+    )
     analyze_parser.set_defaults(func=_analyze)
+
+    # YouTube OAuth setup command
+    auth_parser = subparsers.add_parser(
+        "youtube-auth",
+        help="Set up YouTube OAuth2 authentication (interactive, run once)",
+    )
+    auth_parser.set_defaults(func=_youtube_auth)
 
     return parser
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -26,7 +27,45 @@ def is_youtube_url(value: str) -> bool:
     return any(keyword in host for keyword in YOUTUBE_HOST_KEYWORDS)
 
 
-def _download_youtube_video(url: str, cache_dir: str | None = None) -> PreparedVideo:
+def setup_youtube_oauth() -> bool:
+    """Run interactive OAuth2 setup for YouTube. Returns True on success."""
+    try:
+        import yt_dlp
+    except ImportError as exc:
+        raise RuntimeError(
+            "yt-dlp is required for YouTube URLs. Install dependencies with `pip install -e .`."
+        ) from exc
+
+    # Use a simple test URL to trigger OAuth flow
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    ydl_opts: dict = {
+        "username": "oauth2",
+        "password": "",
+        "skip_download": True,
+        "quiet": False,  # Show OAuth instructions
+    }
+
+    print("Starting YouTube OAuth2 setup...")
+    print("You will be prompted to visit a URL and enter a code.")
+    print()
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info(test_url, download=False)
+        print()
+        print("OAuth2 setup complete! Tokens cached for future use.")
+        return True
+    except Exception as e:
+        print(f"OAuth2 setup failed: {e}")
+        return False
+
+
+def _download_youtube_video(
+    url: str,
+    cache_dir: str | None = None,
+    cookies_file: str | None = None,
+    use_oauth2: bool = False,
+) -> PreparedVideo:
     try:
         import yt_dlp
     except ImportError as exc:
@@ -41,8 +80,18 @@ def _download_youtube_video(url: str, cache_dir: str | None = None) -> PreparedV
     )
     cache_root.mkdir(parents=True, exist_ok=True)
 
+    # Resolve auth method: OAuth2 > cookies file > environment variable
+    effective_oauth2 = use_oauth2 or os.environ.get("YTDLP_USE_OAUTH2", "").lower() in ("1", "true", "yes")
+    effective_cookies = cookies_file or os.environ.get("YTDLP_COOKIES_FILE")
+
+    if effective_cookies and not effective_oauth2:
+        cookies_path = Path(effective_cookies).expanduser().resolve()
+        if not cookies_path.exists():
+            raise FileNotFoundError(f"YouTube cookies file not found: {effective_cookies}")
+        effective_cookies = str(cookies_path)
+
     outtmpl = str(cache_root / "%(id)s.%(ext)s")
-    ydl_opts = {
+    ydl_opts: dict = {
         "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
@@ -50,6 +99,13 @@ def _download_youtube_video(url: str, cache_dir: str | None = None) -> PreparedV
         "quiet": True,
         "no_warnings": True,
     }
+
+    # OAuth2 takes precedence over cookies
+    if effective_oauth2:
+        ydl_opts["username"] = "oauth2"
+        ydl_opts["password"] = ""
+    elif effective_cookies:
+        ydl_opts["cookiefile"] = effective_cookies
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
@@ -84,14 +140,24 @@ def _download_youtube_video(url: str, cache_dir: str | None = None) -> PreparedV
         )
 
 
-def prepare_video_source(source: str, cache_dir: str | None = None) -> PreparedVideo:
+def prepare_video_source(
+    source: str,
+    cache_dir: str | None = None,
+    cookies_file: str | None = None,
+    use_oauth2: bool = False,
+) -> PreparedVideo:
     trimmed = source.strip()
     if is_url(trimmed):
         if not is_youtube_url(trimmed):
             raise ValueError(
                 "Only YouTube URLs are currently supported for remote sources."
             )
-        return _download_youtube_video(trimmed, cache_dir=cache_dir)
+        return _download_youtube_video(
+            trimmed,
+            cache_dir=cache_dir,
+            cookies_file=cookies_file,
+            use_oauth2=use_oauth2,
+        )
 
     path = Path(trimmed).expanduser().resolve()
     if not path.exists():

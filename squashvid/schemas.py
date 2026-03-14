@@ -82,6 +82,8 @@ class AnalyzeRequest(BaseModel):
     cv_workers: int | None = Field(default=None, ge=1, le=128)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None
+    youtube_cookies_file: str | None = None
+    youtube_oauth2: bool = False
 
 
 class AnalyzeOptions(BaseModel):
@@ -99,3 +101,5 @@ class AnalyzeOptions(BaseModel):
     cv_workers: int | None = Field(default=None, ge=1, le=128)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None
+    youtube_cookies_file: str | None = None
+    youtube_oauth2: bool = False

@@ -137,7 +137,12 @@ def analyze_video_execution(
     opts = options or AnalyzeOptions()
     player_a = opts.player_a_name.strip() or "Player A"
     player_b = opts.player_b_name.strip() or "Player B"
-    video_source = prepare_video_source(video_path, cache_dir=opts.youtube_cache_dir)
+    video_source = prepare_video_source(
+        video_path,
+        cache_dir=opts.youtube_cache_dir,
+        cookies_file=opts.youtube_cookies_file,
+        use_oauth2=opts.youtube_oauth2,
+    )
     local_video_path = str(Path(video_source.local_path).expanduser().resolve())
 
     meta = read_video_metadata(local_video_path)
