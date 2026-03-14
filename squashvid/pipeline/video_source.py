@@ -142,17 +142,8 @@ def _download_youtube_video(
     if effective_oauth2:
         ydl_opts["username"] = "oauth2"
         ydl_opts["password"] = ""
-        print("DEBUG: Using OAuth2 for YouTube auth")
     elif effective_cookies:
         ydl_opts["cookiefile"] = effective_cookies
-        # Verify cookie file exists and has content
-        cookie_path = Path(effective_cookies)
-        if cookie_path.exists():
-            print(f"DEBUG: Using cookies file: {effective_cookies} ({cookie_path.stat().st_size} bytes)")
-        else:
-            print(f"DEBUG: WARNING - Cookie file does not exist: {effective_cookies}")
-    else:
-        print("DEBUG: No YouTube auth method configured")
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
