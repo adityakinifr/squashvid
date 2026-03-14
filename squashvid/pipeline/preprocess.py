@@ -250,6 +250,7 @@ def detect_active_segments(
     frame_step: int = 2,
     max_rallies: int | None = None,
     max_duration_sec: float | None = None,
+    start_offset_sec: float = 0.0,
 ) -> list[Segment]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -257,6 +258,12 @@ def detect_active_segments(
 
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0) or 30.0
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    # Seek to start offset if specified
+    start_frame = 0
+    if start_offset_sec > 0.0:
+        start_frame = int(start_offset_sec * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
     previous_gray: np.ndarray | None = None
     motion_samples: list[tuple[float, float]] = []
@@ -287,7 +294,8 @@ def detect_active_segments(
             motion_ratio = _frame_motion_ratio(previous_gray, gray)
         previous_gray = gray
 
-        timestamp = index / fps
+        # Timestamp is absolute (includes start offset)
+        timestamp = start_offset_sec + (index / fps)
         motion_samples.append((timestamp, motion_ratio))
 
         index += 1

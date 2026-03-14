@@ -146,9 +146,8 @@ def analyze_video_execution(
     local_video_path = str(Path(video_source.local_path).expanduser().resolve())
 
     meta = read_video_metadata(local_video_path)
-    max_duration_sec = (
-        float(opts.max_video_minutes) * 60.0 if opts.max_video_minutes is not None else None
-    )
+    start_offset_sec = float(opts.analysis_start_minute) * 60.0
+    max_duration_sec = float(opts.max_video_minutes) * 60.0
     segments = detect_active_segments(
         video_path=local_video_path,
         motion_threshold=opts.motion_threshold,
@@ -157,6 +156,7 @@ def analyze_video_execution(
         frame_step=opts.segment_frame_step,
         max_rallies=opts.max_rallies,
         max_duration_sec=max_duration_sec,
+        start_offset_sec=start_offset_sec,
     )
 
     rallies, worker_count = _build_rallies(
@@ -193,11 +193,11 @@ def analyze_video_execution(
             f"Source downloaded from YouTube{title_info} to: {local_video_path}"
         )
     timeline.notes.append(f"CV workers used: {worker_count}.")
-    if max_duration_sec is not None:
-        timeline.notes.append(
-            f"Analysis window limited to first {effective_duration_sec:.1f}s "
-            f"({effective_duration_sec / 60.0:.2f} minutes)."
-        )
+    end_offset_sec = start_offset_sec + max_duration_sec
+    timeline.notes.append(
+        f"Analysis window: {start_offset_sec:.1f}s to {end_offset_sec:.1f}s "
+        f"({opts.analysis_start_minute:.1f} to {opts.analysis_start_minute + opts.max_video_minutes:.1f} minutes)."
+    )
     timeline.notes.append(f"Player label mapping: A={player_a}, B={player_b}.")
 
     insight: CoachingInsight | None = None

@@ -80,7 +80,8 @@ class AnalyzeRequest(BaseModel):
     segment_frame_step: int = Field(default=2, ge=1, le=12)
     tracking_frame_step: int = Field(default=4, ge=1, le=12)
     cv_workers: int | None = Field(default=None, ge=1, le=128)
-    max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
+    analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
+    max_video_minutes: float = Field(default=1.0, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False
@@ -99,7 +100,8 @@ class AnalyzeOptions(BaseModel):
     segment_frame_step: int = Field(default=2, ge=1, le=12)
     tracking_frame_step: int = Field(default=4, ge=1, le=12)
     cv_workers: int | None = Field(default=None, ge=1, le=128)
-    max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
+    analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
+    max_video_minutes: float = Field(default=1.0, gt=0.05, le=240.0)
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False

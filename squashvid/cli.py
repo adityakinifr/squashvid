@@ -27,6 +27,7 @@ def _analyze(args: argparse.Namespace) -> int:
         segment_frame_step=args.segment_frame_step,
         tracking_frame_step=args.tracking_frame_step,
         cv_workers=args.cv_workers,
+        analysis_start_minute=args.analysis_start_minute,
         max_video_minutes=args.max_video_minutes,
         youtube_cache_dir=args.youtube_cache_dir,
         youtube_cookies_file=args.youtube_cookies_file,
@@ -129,10 +130,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Worker processes for per-rally CV tracking (default: auto up to CPU cores)",
     )
     analyze_parser.add_argument(
+        "--analysis-start-minute",
+        type=float,
+        default=0.0,
+        help="Start analysis at this minute offset (default: 0)",
+    )
+    analyze_parser.add_argument(
         "--max-video-minutes",
         type=float,
-        default=None,
-        help="Analyze only the first X minutes of the video",
+        default=1.0,
+        help="Duration of video to analyze in minutes (default: 1)",
     )
     analyze_parser.add_argument(
         "--youtube-cache-dir",
