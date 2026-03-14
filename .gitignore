@@ -32,3 +32,6 @@ Thumbs.db
 
 # API keys directory (if any)
 sk-proj-*/
+
+# YouTube cookies (comment out this line if you need to deploy with cookies)
+# youtube_cookies.txt
