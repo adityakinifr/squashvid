@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import base64
 import os
 import tempfile
 from dataclasses import dataclass
@@ -9,6 +10,20 @@ from urllib.parse import urlparse
 
 # Module-level temp file for cookies (cleaned up on exit)
 _cookies_temp_file: str | None = None
+
+
+def _get_cookies_content_from_env() -> str | None:
+    """Get cookie content from environment variables (base64 or plain text)."""
+    # Check for base64 encoded cookies first (YOUTUBE_COOKIES_B64 or YTDLP_COOKIES_B64)
+    b64_content = os.environ.get("YOUTUBE_COOKIES_B64") or os.environ.get("YTDLP_COOKIES_B64")
+    if b64_content:
+        try:
+            return base64.b64decode(b64_content).decode("utf-8")
+        except Exception:
+            pass
+
+    # Fall back to plain text cookies
+    return os.environ.get("YTDLP_COOKIES")
 
 YOUTUBE_HOST_KEYWORDS = ("youtube.com", "youtu.be", "m.youtube.com")
 
@@ -101,15 +116,17 @@ def _download_youtube_video(
             if not cookies_path.exists():
                 raise FileNotFoundError(f"YouTube cookies file not found: {os.environ['YTDLP_COOKIES_FILE']}")
             effective_cookies = str(cookies_path)
-        elif os.environ.get("YTDLP_COOKIES"):
-            # Cookie content passed directly as env var - write to temp file
-            global _cookies_temp_file
-            if _cookies_temp_file is None:
-                fd, _cookies_temp_file = tempfile.mkstemp(suffix=".txt", prefix="ytdlp_cookies_")
-                os.write(fd, os.environ["YTDLP_COOKIES"].encode("utf-8"))
-                os.close(fd)
-                atexit.register(lambda: os.unlink(_cookies_temp_file) if os.path.exists(_cookies_temp_file) else None)
-            effective_cookies = _cookies_temp_file
+        else:
+            # Check for cookie content in env vars (base64 or plain text)
+            cookies_content = _get_cookies_content_from_env()
+            if cookies_content:
+                global _cookies_temp_file
+                if _cookies_temp_file is None:
+                    fd, _cookies_temp_file = tempfile.mkstemp(suffix=".txt", prefix="ytdlp_cookies_")
+                    os.write(fd, cookies_content.encode("utf-8"))
+                    os.close(fd)
+                    atexit.register(lambda: os.unlink(_cookies_temp_file) if os.path.exists(_cookies_temp_file) else None)
+                effective_cookies = _cookies_temp_file
 
     outtmpl = str(cache_root / "%(id)s.%(ext)s")
     ydl_opts: dict = {
