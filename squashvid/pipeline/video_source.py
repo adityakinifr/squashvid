@@ -135,13 +135,9 @@ def _download_youtube_video(
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
-        # Use iOS client (supports cookies) to bypass JS challenges, and enable remote components
-        "extractor_args": {
-            "youtube": [
-                "player_client=ios,web",
-                "enable_remote_components=ejs:github",
-            ]
-        },
+        # Enable Node.js runtime for JS challenge solving
+        "js_runtimes": "node",
+        "enable_remote_components": "ejs:github",
     }
 
     # OAuth2 takes precedence over cookies

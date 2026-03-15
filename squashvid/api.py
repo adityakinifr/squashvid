@@ -104,6 +104,7 @@ def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -
     # Test 1: Without cookies (to test JS challenge in isolation)
     cmd_no_cookies = [
         "yt-dlp", "--list-formats",
+        "--js-runtimes", "node",
         "--remote-components", "ejs:github",
         url
     ]
@@ -117,6 +118,7 @@ def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -
     if cookies_file:
         cmd_with_cookies = [
             "yt-dlp", "--list-formats",
+            "--js-runtimes", "node",
             "--remote-components", "ejs:github",
             "--cookies", cookies_file,
             url
