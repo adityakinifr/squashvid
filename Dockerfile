@@ -1,7 +1,7 @@
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
-# Cache bust: v8 - force full rebuild
-ARG CACHEBUST=8
+# Force complete rebuild
+RUN echo "Build timestamp: $(date)" > /build_time.txt
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
