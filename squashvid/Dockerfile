@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Cache bust: v3
-ARG CACHEBUST=3
+# Cache bust: v4
+ARG CACHEBUST=4
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -23,6 +23,7 @@ COPY . ./squashvid/
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 # Expose port
 EXPOSE 8000
