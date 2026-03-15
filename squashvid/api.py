@@ -1,21 +1,171 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
 import os
 import tempfile
+import threading
 import uuid
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from squashvid.pipeline.video_source import is_url
 from squashvid.pipeline.preprocess import SEGMENTER_VERSION
 from squashvid.schemas import AnalysisResult, AnalyzeOptions, AnalyzeRequest
+
+# Supabase client for async updates
+_supabase_client = None
+
+def get_supabase():
+    global _supabase_client
+    if _supabase_client is None:
+        url = os.environ.get("SUPABASE_URL")
+        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if url and key:
+            from supabase import create_client
+            _supabase_client = create_client(url, key)
+    return _supabase_client
+
+
+class AsyncAnalyzeRequest(BaseModel):
+    analysis_id: str
+    video_url: str
+    analysis_start_minute: float = 0.0
+    max_video_minutes: float = 1.0
+
+
+# Simple task queue for sequential processing
+from dataclasses import dataclass
+from queue import Queue
+import time
+
+@dataclass
+class AnalysisTask:
+    analysis_id: str
+    video_url: str
+    start_minute: float
+    max_minutes: float
+    queued_at: float
+
+_task_queue: Queue[AnalysisTask] = Queue()
+_current_task: AnalysisTask | None = None
+_queue_lock = threading.Lock()
+_worker_started = False
+
+
+def _get_queue_status(analysis_id: str) -> dict:
+    """Get the queue position for an analysis."""
+    with _queue_lock:
+        if _current_task and _current_task.analysis_id == analysis_id:
+            return {"status": "processing", "position": 0}
+
+        # Check queue position
+        position = 1  # Start at 1 (after current task)
+        for task in list(_task_queue.queue):
+            if task.analysis_id == analysis_id:
+                return {"status": "queued", "position": position}
+            position += 1
+
+        return {"status": "not_found", "position": -1}
+
+
+def _queue_worker():
+    """Background worker that processes tasks from the queue one at a time."""
+    global _current_task
+
+    while True:
+        try:
+            task = _task_queue.get(block=True)
+
+            with _queue_lock:
+                _current_task = task
+
+            # Update status to processing
+            db = get_supabase()
+            if db:
+                try:
+                    db.table("mac_video_analyses").update({
+                        "status": "processing",
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }).eq("id", task.analysis_id).execute()
+                except Exception as e:
+                    print(f"[queue] Failed to update status to processing: {e}")
+
+            # Process the video
+            _process_video_sync(task.analysis_id, task.video_url, task.start_minute, task.max_minutes)
+
+            with _queue_lock:
+                _current_task = None
+
+            _task_queue.task_done()
+
+        except Exception as e:
+            print(f"[queue] Worker error: {e}")
+            with _queue_lock:
+                _current_task = None
+
+
+def _start_worker():
+    """Start the background worker thread if not already started."""
+    global _worker_started
+    if not _worker_started:
+        _worker_started = True
+        worker = threading.Thread(target=_queue_worker, daemon=True)
+        worker.start()
+        print("[queue] Worker thread started")
+
+
+def _process_video_sync(analysis_id: str, video_url: str, start_minute: float, max_minutes: float):
+    """Synchronously process video and update Supabase."""
+    from squashvid.pipeline.orchestrator import analyze_video_execution
+
+    db = get_supabase()
+    if not db:
+        print(f"[sync] No Supabase client for analysis {analysis_id}")
+        return
+
+    try:
+        print(f"[sync] Starting analysis {analysis_id}: {video_url}")
+
+        options = AnalyzeOptions(
+            include_llm=False,
+            analysis_start_minute=start_minute,
+            max_video_minutes=max_minutes,
+        )
+
+        execution = analyze_video_execution(video_url, options)
+        result_dict = execution.result.model_dump()
+
+        # Update Supabase with success
+        db.table("mac_video_analyses").update({
+            "status": "done",
+            "result_json": result_dict,
+            "updated_at": datetime.utcnow().isoformat(),
+        }).eq("id", analysis_id).execute()
+
+        print(f"[sync] Completed analysis {analysis_id}")
+
+    except Exception as exc:
+        error_msg = str(exc)
+        print(f"[sync] Failed analysis {analysis_id}: {error_msg}")
+
+        # Update Supabase with failure
+        try:
+            db.table("mac_video_analyses").update({
+                "status": "failed",
+                "admin_notes": f"Processing error: {error_msg[:500]}",
+                "updated_at": datetime.utcnow().isoformat(),
+            }).eq("id", analysis_id).execute()
+        except Exception as db_err:
+            print(f"[sync] Failed to update DB for {analysis_id}: {db_err}")
 
 app = FastAPI(title="SquashVid Analyzer", version="0.1.0")
 BASE_DIR = Path(__file__).resolve().parent
@@ -77,77 +227,53 @@ def health() -> dict[str, str]:
     return {"status": "ok", "segmenter_version": SEGMENTER_VERSION}
 
 
-@app.get("/debug/yt-formats")
-def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -> dict:
-    """Debug endpoint to check yt-dlp format availability."""
-    import subprocess
-    import base64
+@app.post("/analyze/async")
+async def analyze_async(request: AsyncAnalyzeRequest):
+    """
+    Queue video analysis. Returns immediately with queue position.
+    The result will be written to Supabase when done.
+    """
+    # Ensure worker is started
+    _start_worker()
 
-    # Check cookies
-    cookies_b64 = os.environ.get("YOUTUBE_COOKIES_B64", "")
-    cookies_info = f"YOUTUBE_COOKIES_B64 length: {len(cookies_b64)}"
+    # Create task and add to queue
+    task = AnalysisTask(
+        analysis_id=request.analysis_id,
+        video_url=request.video_url,
+        start_minute=request.analysis_start_minute,
+        max_minutes=request.max_video_minutes,
+        queued_at=time.time(),
+    )
 
-    # Write cookies to temp file if available
-    cookies_file = None
-    if cookies_b64:
-        try:
-            cookies_content = base64.b64decode(cookies_b64).decode("utf-8")
-            fd, cookies_file = tempfile.mkstemp(suffix=".txt")
-            os.write(fd, cookies_content.encode("utf-8"))
-            os.close(fd)
-        except Exception as e:
-            cookies_info += f", decode error: {e}"
+    # Check if already in queue
+    existing = _get_queue_status(request.analysis_id)
+    if existing["status"] != "not_found":
+        return {
+            "status": existing["status"],
+            "analysis_id": request.analysis_id,
+            "position": existing["position"],
+            "message": f"Already {'processing' if existing['status'] == 'processing' else 'in queue'}.",
+        }
 
-    # Test both with and without cookies
-    results = {}
-
-    # Test 1: Without cookies (to test JS challenge in isolation)
-    cmd_no_cookies = [
-        "yt-dlp", "--list-formats",
-        "--js-runtimes", "node",
-        "--remote-components", "ejs:github",
-        url
-    ]
-    try:
-        result = subprocess.run(cmd_no_cookies, capture_output=True, text=True, timeout=60)
-        results["no_cookies"] = result.stdout + "\n" + result.stderr
-    except Exception as e:
-        results["no_cookies"] = f"Error: {e}"
-
-    # Test 2: With cookies
-    if cookies_file:
-        cmd_with_cookies = [
-            "yt-dlp", "--list-formats",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "--cookies", cookies_file,
-            url
-        ]
-        try:
-            result = subprocess.run(cmd_with_cookies, capture_output=True, text=True, timeout=60)
-            results["with_cookies"] = result.stdout + "\n" + result.stderr
-        except Exception as e:
-            results["with_cookies"] = f"Error: {e}"
-    else:
-        results["with_cookies"] = "No cookies available"
-
-    output = f"=== NO COOKIES ===\n{results['no_cookies']}\n\n=== WITH COOKIES ===\n{results['with_cookies']}"
-
-    # Cleanup cookies file
-    if cookies_file and os.path.exists(cookies_file):
-        os.unlink(cookies_file)
-
-    # Also check node version
-    try:
-        node_result = subprocess.run(["node", "--version"], capture_output=True, text=True)
-        node_version = node_result.stdout.strip()
-    except Exception:
-        node_version = "Node not found"
+    _task_queue.put(task)
+    queue_status = _get_queue_status(request.analysis_id)
 
     return {
-        "cookies_info": cookies_info,
-        "node_version": node_version,
-        "yt_dlp_output": output,
+        "status": queue_status["status"],
+        "analysis_id": request.analysis_id,
+        "position": queue_status["position"],
+        "message": "Added to processing queue.",
+    }
+
+
+@app.get("/analyze/status/{analysis_id}")
+async def get_analysis_status(analysis_id: str):
+    """Get the queue status for an analysis."""
+    status = _get_queue_status(analysis_id)
+    return {
+        "analysis_id": analysis_id,
+        "status": status["status"],
+        "position": status["position"],
     }
 
 
