@@ -130,9 +130,13 @@ def _download_youtube_video(
 
     outtmpl = str(cache_root / "%(id)s.%(ext)s")
     ydl_opts: dict = {
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "outtmpl": outtmpl,
         "merge_output_format": "mp4",
+        "postprocessors": [{
+            "key": "FFmpegVideoConvertor",
+            "preferedformat": "mp4",
+        }],
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
