@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Cache bust: v4 - debug import error
-ARG CACHEBUST=4
+# Cache bust: v5 - show full traceback
+ARG CACHEBUST=5
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY squashvid/ ./squashvid/
+COPY start.py .
 
 # Set environment
 ENV PYTHONUNBUFFERED=1
@@ -28,5 +29,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
 # Run the app - Railway provides PORT env var
-# Debug: Test import before starting uvicorn
-CMD python -c "import squashvid.api; print('Import successful')" && uvicorn squashvid.api:app --host 0.0.0.0 --port ${PORT:-8000}
+CMD python start.py
