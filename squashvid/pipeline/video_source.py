@@ -129,49 +129,58 @@ def _download_youtube_video(
                 effective_cookies = _cookies_temp_file
 
     outtmpl = str(cache_root / "%(id)s.%(ext)s")
-    ydl_opts: dict = {
-        "format": "best",
-        "outtmpl": outtmpl,
-        "noplaylist": True,
-        "quiet": False,
-        "no_warnings": False,
-        # Enable Node.js runtime for JS challenge solving
-        "js_runtimes": {"node": {}},
-        "enable_remote_components": "ejs:github",
-    }
 
-    # OAuth2 takes precedence over cookies
+    # Use subprocess to call yt-dlp with proper CLI flags for JS runtime
+    import subprocess
+    import json as json_mod
+
+    cmd = [
+        "yt-dlp",
+        "--format", "best",
+        "--output", outtmpl,
+        "--no-playlist",
+        "--js-runtimes", "node",
+        "--remote-components", "ejs:github",
+        "--print-json",
+        url
+    ]
+
     if effective_oauth2:
-        ydl_opts["username"] = "oauth2"
-        ydl_opts["password"] = ""
+        cmd.extend(["--username", "oauth2", "--password", ""])
     elif effective_cookies:
-        ydl_opts["cookiefile"] = effective_cookies
+        cmd.extend(["--cookies", effective_cookies])
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        final_path: str | None = None
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"yt-dlp failed: {result.stderr}")
 
-        requested = info.get("requested_downloads") or []
-        for item in requested:
-            candidate = item.get("filepath")
-            if candidate and Path(candidate).exists():
-                final_path = candidate
-                break
+    # Parse the JSON output to get download info
+    info = json_mod.loads(result.stdout.strip().split('\n')[-1])
+    final_path: str | None = None
 
-        if final_path is None:
-            prepared = ydl.prepare_filename(info)
-            prepared_path = Path(prepared)
-            if prepared_path.exists():
-                final_path = str(prepared_path)
-            else:
-                mp4_candidate = prepared_path.with_suffix(".mp4")
-                if mp4_candidate.exists():
-                    final_path = str(mp4_candidate)
+    requested = info.get("requested_downloads") or []
+    for item in requested:
+        candidate = item.get("filepath")
+        if candidate and Path(candidate).exists():
+            final_path = candidate
+            break
 
-        if final_path is None:
-            raise RuntimeError("YouTube download completed but output file was not found.")
+    if final_path is None:
+        # Try to find the file using the template
+        video_id = info.get("id", "")
+        ext = info.get("ext", "mp4")
+        expected_path = cache_root / f"{video_id}.{ext}"
+        if expected_path.exists():
+            final_path = str(expected_path)
+        else:
+            mp4_candidate = cache_root / f"{video_id}.mp4"
+            if mp4_candidate.exists():
+                final_path = str(mp4_candidate)
 
-        return PreparedVideo(
+    if final_path is None:
+        raise RuntimeError("YouTube download completed but output file was not found.")
+
+    return PreparedVideo(
             source=url,
             local_path=str(Path(final_path).expanduser().resolve()),
             downloaded=True,
