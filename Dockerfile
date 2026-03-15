@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Cache bust: v6 - ensure supabase installed
-ARG CACHEBUST=6
+# Cache bust: v8 - force full rebuild
+ARG CACHEBUST=8
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,7 +16,8 @@ WORKDIR /app
 
 # Copy requirements and install
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ARG PIP_BUST=2
+RUN pip install --no-cache-dir -r requirements.txt && pip list | grep -i supabase
 
 # Copy application code
 COPY squashvid/ ./squashvid/
