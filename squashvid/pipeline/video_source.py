@@ -135,10 +135,10 @@ def _download_youtube_video(
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
-        # Use Android client to bypass JS challenges, and enable remote components
+        # Use iOS client (supports cookies) to bypass JS challenges, and enable remote components
         "extractor_args": {
             "youtube": [
-                "player_client=android,web",
+                "player_client=ios,web",
                 "enable_remote_components=ejs:github",
             ]
         },

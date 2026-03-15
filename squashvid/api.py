@@ -98,10 +98,10 @@ def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -
         except Exception as e:
             cookies_info += f", decode error: {e}"
 
-    # Run yt-dlp --list-formats with Android client and remote components
+    # Run yt-dlp --list-formats with ios client (supports cookies) and remote components
     cmd = [
         "yt-dlp", "--list-formats",
-        "--extractor-args", "youtube:player_client=android,web",
+        "--extractor-args", "youtube:player_client=ios,web",
         "--remote-components", "ejs:github",
         url
     ]
