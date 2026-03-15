@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Cache bust: v5 - show full traceback
-ARG CACHEBUST=5
+# Cache bust: v6 - ensure supabase installed
+ARG CACHEBUST=6
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
