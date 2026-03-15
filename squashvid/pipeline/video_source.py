@@ -135,6 +135,8 @@ def _download_youtube_video(
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        # Enable remote JS challenge solver from GitHub
+        "extractor_args": {"youtube": ["enable_remote_components=ejs:github"]},
     }
 
     # OAuth2 takes precedence over cookies
