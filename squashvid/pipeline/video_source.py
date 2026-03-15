@@ -136,7 +136,7 @@ def _download_youtube_video(
         "quiet": False,
         "no_warnings": False,
         # Enable Node.js runtime for JS challenge solving
-        "js_runtimes": "node",
+        "js_runtimes": {"node": {}},
         "enable_remote_components": "ejs:github",
     }
 
