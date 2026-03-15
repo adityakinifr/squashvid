@@ -98,24 +98,42 @@ def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -
         except Exception as e:
             cookies_info += f", decode error: {e}"
 
-    # Run yt-dlp --list-formats with ios client (supports cookies) and remote components
-    cmd = [
+    # Test both with and without cookies
+    results = {}
+
+    # Test 1: Without cookies (to test JS challenge in isolation)
+    cmd_no_cookies = [
         "yt-dlp", "--list-formats",
-        "--extractor-args", "youtube:player_client=ios,web",
         "--remote-components", "ejs:github",
         url
     ]
-    if cookies_file:
-        cmd.extend(["--cookies", cookies_file])
-
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        output = result.stdout + "\n" + result.stderr
+        result = subprocess.run(cmd_no_cookies, capture_output=True, text=True, timeout=60)
+        results["no_cookies"] = result.stdout + "\n" + result.stderr
     except Exception as e:
-        output = f"Error running yt-dlp: {e}"
-    finally:
-        if cookies_file and os.path.exists(cookies_file):
-            os.unlink(cookies_file)
+        results["no_cookies"] = f"Error: {e}"
+
+    # Test 2: With cookies
+    if cookies_file:
+        cmd_with_cookies = [
+            "yt-dlp", "--list-formats",
+            "--remote-components", "ejs:github",
+            "--cookies", cookies_file,
+            url
+        ]
+        try:
+            result = subprocess.run(cmd_with_cookies, capture_output=True, text=True, timeout=60)
+            results["with_cookies"] = result.stdout + "\n" + result.stderr
+        except Exception as e:
+            results["with_cookies"] = f"Error: {e}"
+    else:
+        results["with_cookies"] = "No cookies available"
+
+    output = f"=== NO COOKIES ===\n{results['no_cookies']}\n\n=== WITH COOKIES ===\n{results['with_cookies']}"
+
+    # Cleanup cookies file
+    if cookies_file and os.path.exists(cookies_file):
+        os.unlink(cookies_file)
 
     # Also check node version
     try:
