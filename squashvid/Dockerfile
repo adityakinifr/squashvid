@@ -1,15 +1,19 @@
 FROM python:3.11-slim
 
-# Cache bust: v4
-ARG CACHEBUST=4
+# Cache bust: v5
+ARG CACHEBUST=5
 
-# Install system dependencies
+# Install system dependencies including Node.js for yt-dlp JS challenges
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
+    curl \
+    ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
