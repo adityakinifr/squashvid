@@ -77,6 +77,55 @@ def health() -> dict[str, str]:
     return {"status": "ok", "segmenter_version": SEGMENTER_VERSION}
 
 
+@app.get("/debug/yt-formats")
+def debug_yt_formats(url: str = "https://www.youtube.com/watch?v=M-DkFqjwiMU") -> dict:
+    """Debug endpoint to check yt-dlp format availability."""
+    import subprocess
+    import base64
+
+    # Check cookies
+    cookies_b64 = os.environ.get("YOUTUBE_COOKIES_B64", "")
+    cookies_info = f"YOUTUBE_COOKIES_B64 length: {len(cookies_b64)}"
+
+    # Write cookies to temp file if available
+    cookies_file = None
+    if cookies_b64:
+        try:
+            cookies_content = base64.b64decode(cookies_b64).decode("utf-8")
+            fd, cookies_file = tempfile.mkstemp(suffix=".txt")
+            os.write(fd, cookies_content.encode("utf-8"))
+            os.close(fd)
+        except Exception as e:
+            cookies_info += f", decode error: {e}"
+
+    # Run yt-dlp --list-formats
+    cmd = ["yt-dlp", "--list-formats", url]
+    if cookies_file:
+        cmd.extend(["--cookies", cookies_file])
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        output = result.stdout + "\n" + result.stderr
+    except Exception as e:
+        output = f"Error running yt-dlp: {e}"
+    finally:
+        if cookies_file and os.path.exists(cookies_file):
+            os.unlink(cookies_file)
+
+    # Also check node version
+    try:
+        node_result = subprocess.run(["node", "--version"], capture_output=True, text=True)
+        node_version = node_result.stdout.strip()
+    except Exception:
+        node_version = "Node not found"
+
+    return {
+        "cookies_info": cookies_info,
+        "node_version": node_version,
+        "yt_dlp_output": output,
+    }
+
+
 @app.post("/analyze/path", response_model=AnalysisResult)
 async def analyze_path(request: AnalyzeRequest) -> AnalysisResult:
     from squashvid.pipeline.orchestrator import analyze_video_execution
