@@ -132,7 +132,11 @@
                 <input id="cv-workers" type="number" min="1" max="128" step="1" placeholder="auto = all cores" />
               </div>
               <div class="field-group compact">
-                <label for="max-video-minutes">Analyze First X Minutes (optional)</label>
+                <label for="analysis-start-minute">Start At Minute</label>
+                <input id="analysis-start-minute" type="number" min="0" max="240" step="0.1" value="0" />
+              </div>
+              <div class="field-group compact">
+                <label for="max-video-minutes">Analyze Duration Minutes (optional)</label>
                 <input id="max-video-minutes" type="number" min="0.1" max="240" step="0.1" placeholder="full video" />
               </div>
             </div>
@@ -179,7 +183,16 @@
           <div id="rally-chart" class="chart-wrap"></div>
         </article>
 
-        <article class="panel rallies reveal" style="--stagger: 5">
+        <article id="diagnostics-panel" class="panel diagnostics reveal hidden" style="--stagger: 5">
+          <div class="panel-head">
+            <h2>Segmentation Diagnostics</h2>
+            <p>How the rally boundaries were chosen</p>
+          </div>
+          <div id="diagnostics-cards" class="diagnostics-cards"></div>
+          <div id="segment-preview" class="segment-preview"></div>
+        </article>
+
+        <article class="panel rallies reveal" style="--stagger: 6">
           <div class="panel-head">
             <h2>Rally Timeline</h2>
             <p>Shot sequence, movement, and outcome by rally</p>
@@ -232,6 +245,19 @@
             <div class="panel-head">
               <h3>Rally Review Scrubber</h3>
               <p id="review-meta">Select a rally card to inspect the cropped view.</p>
+            </div>
+            <div class="boundary-editor" aria-label="Preview rally boundary edits">
+              <div class="field-group compact">
+                <label for="boundary-start">Preview Start (s)</label>
+                <input id="boundary-start" type="number" min="0" step="0.1" />
+              </div>
+              <div class="field-group compact">
+                <label for="boundary-end">Preview End (s)</label>
+                <input id="boundary-end" type="number" min="0" step="0.1" />
+              </div>
+              <button id="boundary-apply" type="button" class="secondary">Preview Bounds</button>
+              <button id="boundary-reset" type="button" class="secondary">Reset</button>
+              <p id="boundary-note">Preview only. Shot detection is not recomputed until we add saved boundary corrections.</p>
             </div>
             <div class="review-stage">
               <canvas id="review-canvas" width="960" height="540"></canvas>

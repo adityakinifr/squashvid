@@ -39,7 +39,7 @@ class AsyncAnalyzeRequest(BaseModel):
     analysis_id: str
     video_url: str
     analysis_start_minute: float = 0.0
-    max_video_minutes: float = 1.0
+    max_video_minutes: float | None = None
 
 
 # Simple task queue for sequential processing
@@ -52,7 +52,7 @@ class AnalysisTask:
     analysis_id: str
     video_url: str
     start_minute: float
-    max_minutes: float
+    max_minutes: float | None
     queued_at: float
 
 _task_queue: Queue[AnalysisTask] = Queue()
@@ -123,7 +123,12 @@ def _start_worker():
         print("[queue] Worker thread started")
 
 
-def _process_video_sync(analysis_id: str, video_url: str, start_minute: float, max_minutes: float):
+def _process_video_sync(
+    analysis_id: str,
+    video_url: str,
+    start_minute: float,
+    max_minutes: float | None,
+):
     """Synchronously process video and update Supabase."""
     from squashvid.pipeline.orchestrator import analyze_video_execution
 
@@ -338,7 +343,7 @@ async def analyze_upload(
     tracking_frame_step: int = Form(4),
     cv_workers: int | None = Form(None, ge=1, le=128),
     analysis_start_minute: float = Form(0.0, ge=0.0, le=240.0),
-    max_video_minutes: float = Form(1.0, gt=0.05, le=240.0),
+    max_video_minutes: float | None = Form(None, gt=0.05, le=240.0),
     youtube_cache_dir: str | None = Form(None),
     youtube_cookies_file: str | None = Form(None),
     youtube_oauth2: bool = Form(False),

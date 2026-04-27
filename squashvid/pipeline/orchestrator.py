@@ -11,7 +11,7 @@ from squashvid.pipeline.llm import generate_coaching_insight
 from squashvid.pipeline.models import Segment
 from squashvid.pipeline.preprocess import (
     SEGMENTER_VERSION,
-    detect_active_segments,
+    detect_active_segments_with_diagnostics,
     read_video_metadata,
 )
 from squashvid.pipeline.video_source import prepare_video_source
@@ -147,8 +147,12 @@ def analyze_video_execution(
 
     meta = read_video_metadata(local_video_path)
     start_offset_sec = float(opts.analysis_start_minute) * 60.0
-    max_duration_sec = float(opts.max_video_minutes) * 60.0
-    segments = detect_active_segments(
+    max_duration_sec = (
+        float(opts.max_video_minutes) * 60.0
+        if opts.max_video_minutes is not None
+        else None
+    )
+    segmentation = detect_active_segments_with_diagnostics(
         video_path=local_video_path,
         motion_threshold=opts.motion_threshold,
         min_rally_sec=opts.min_rally_sec,
@@ -158,6 +162,7 @@ def analyze_video_execution(
         max_duration_sec=max_duration_sec,
         start_offset_sec=start_offset_sec,
     )
+    segments = segmentation.segments
 
     rallies, worker_count = _build_rallies(
         local_video_path=local_video_path,
@@ -168,12 +173,18 @@ def analyze_video_execution(
 
     fps = float(meta["fps"])
     source_duration_sec = float(meta.get("duration_sec", 0.0) or 0.0)
-    effective_duration_sec = source_duration_sec
+    if source_duration_sec > 0.0:
+        source_window_end_sec = source_duration_sec
+    elif max_duration_sec is not None:
+        source_window_end_sec = start_offset_sec + max_duration_sec
+    else:
+        source_window_end_sec = float(segmentation.diagnostics.get("window_end_sec", 0.0) or 0.0)
+
+    effective_start_sec = min(start_offset_sec, source_window_end_sec)
+    effective_end_sec = source_window_end_sec
     if max_duration_sec is not None:
-        if effective_duration_sec > 0.0:
-            effective_duration_sec = min(effective_duration_sec, max_duration_sec)
-        else:
-            effective_duration_sec = max_duration_sec
+        effective_end_sec = min(source_window_end_sec, start_offset_sec + max_duration_sec)
+    effective_duration_sec = max(0.0, effective_end_sec - effective_start_sec)
 
     if fps > 0 and effective_duration_sec > 0:
         effective_frame_count = max(1, int(round(effective_duration_sec * fps)))
@@ -186,6 +197,15 @@ def analyze_video_execution(
         frame_count=effective_frame_count,
         rallies=rallies,
     )
+    timeline.diagnostics["segmentation"] = segmentation.diagnostics
+    timeline.diagnostics["analysis_window"] = {
+        "start_sec": round(float(effective_start_sec), 3),
+        "end_sec": round(float(effective_end_sec), 3),
+        "duration_sec": round(float(effective_duration_sec), 3),
+        "max_video_minutes": round(float(opts.max_video_minutes), 3)
+        if opts.max_video_minutes is not None
+        else None,
+    }
     timeline.notes.append(f"Segmentation engine: {SEGMENTER_VERSION}.")
     if video_source.downloaded:
         title_info = f" ({video_source.title})" if video_source.title else ""
@@ -193,11 +213,24 @@ def analyze_video_execution(
             f"Source downloaded from YouTube{title_info} to: {local_video_path}"
         )
     timeline.notes.append(f"CV workers used: {worker_count}.")
-    end_offset_sec = start_offset_sec + max_duration_sec
-    timeline.notes.append(
-        f"Analysis window: {start_offset_sec:.1f}s to {end_offset_sec:.1f}s "
-        f"({opts.analysis_start_minute:.1f} to {opts.analysis_start_minute + opts.max_video_minutes:.1f} minutes)."
+    end_label = f"{effective_end_sec:.1f}s" if effective_end_sec > 0.0 else "source end"
+    max_minutes_label = (
+        f"{opts.max_video_minutes:.1f} minutes"
+        if opts.max_video_minutes is not None
+        else "full available video"
     )
+    timeline.notes.append(
+        f"Analysis window: {start_offset_sec:.1f}s to {end_label} "
+        f"(start {opts.analysis_start_minute:.1f} minutes, duration {max_minutes_label})."
+    )
+    if segmentation.diagnostics.get("adaptive_used"):
+        timeline.notes.append(
+            "Adaptive segmentation threshold was used because the base threshold produced weak boundaries."
+        )
+    if segmentation.diagnostics.get("fallback_full_window_used"):
+        timeline.notes.append(
+            "No confident rally breaks were detected, so the analyzed window was kept as one fallback segment."
+        )
     timeline.notes.append(f"Player label mapping: A={player_a}, B={player_b}.")
 
     insight: CoachingInsight | None = None

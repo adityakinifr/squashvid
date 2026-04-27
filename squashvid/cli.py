@@ -138,8 +138,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument(
         "--max-video-minutes",
         type=float,
-        default=1.0,
-        help="Duration of video to analyze in minutes (default: 1)",
+        default=None,
+        help="Optional duration of video to analyze in minutes (default: full available video)",
     )
     analyze_parser.add_argument(
         "--youtube-cache-dir",

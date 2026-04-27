@@ -105,12 +105,14 @@ UI includes a **Rally Review Scrubber**:
 - video view is cropped to the inferred rally focus area
 - shot markers appear on the scrubber timeline and are clickable
 - selected rally panel shows full shot-by-shot details
+- preview controls let you adjust selected rally start/end bounds locally for review
 - rally grid supports sorting by match order, longest, shortest, or most shots
 - rally picker lets you jump directly to a specific rally number
 - filters include winner, rally-length range, and shot-count range
 - player names are configurable (A/B labels become custom names across UI + insights)
 - coaching insights are rendered as visual cards for patterns, drills, and full written report sections
-- advanced controls include CV worker-process count and “analyze first X minutes”
+- advanced controls include CV worker-process count, start minute, and optional duration
+- segmentation diagnostics show analyzed window, threshold choice, candidate segments, and fallback usage
 
 Analyze by file path:
 
@@ -136,6 +138,11 @@ curl -X POST http://localhost:8000/analyze/path \
 curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
   -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"cv_workers":10,"max_video_minutes":12}'
+
+# with explicit start/end analysis window
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"analysis_start_minute":4,"max_video_minutes":8}'
 
 # with per-request API key override
 curl -X POST http://localhost:8000/analyze/path \

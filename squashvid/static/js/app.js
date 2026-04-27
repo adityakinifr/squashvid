@@ -14,6 +14,9 @@ const kpiGrid = document.getElementById("kpi-grid");
 const tacticalBars = document.getElementById("tactical-bars");
 const movementCards = document.getElementById("movement-cards");
 const rallyChart = document.getElementById("rally-chart");
+const diagnosticsPanel = document.getElementById("diagnostics-panel");
+const diagnosticsCards = document.getElementById("diagnostics-cards");
+const segmentPreview = document.getElementById("segment-preview");
 const rallyList = document.getElementById("rally-list");
 const rallySort = document.getElementById("rally-sort");
 const winnerFilter = document.getElementById("winner-filter");
@@ -34,6 +37,11 @@ const shotMarkers = document.getElementById("shot-markers");
 const shotCaption = document.getElementById("shot-caption");
 const selectedRallyKpis = document.getElementById("selected-rally-kpis");
 const selectedRallyShots = document.getElementById("selected-rally-shots");
+const boundaryStartInput = document.getElementById("boundary-start");
+const boundaryEndInput = document.getElementById("boundary-end");
+const boundaryApplyBtn = document.getElementById("boundary-apply");
+const boundaryResetBtn = document.getElementById("boundary-reset");
+const boundaryNote = document.getElementById("boundary-note");
 
 const insightPanel = document.getElementById("insight-panel");
 const insightModel = document.getElementById("insight-model");
@@ -58,6 +66,7 @@ let reviewTimeSync = false;
 let allRallies = [];
 let displayedRallies = [];
 let playerNames = { A: "Player A", B: "Player B" };
+let selectedOriginalBounds = null;
 
 function activeMode() {
   const checked = modeRadios.find((radio) => radio.checked);
@@ -180,6 +189,26 @@ function parseBound(value) {
     return null;
   }
   return num;
+}
+
+function parsePositiveNumber(value, fallback = null) {
+  const parsed = parseBound(value);
+  if (parsed === null || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function cloneRallyForReview(rally) {
+  if (!rally || typeof rally !== "object") {
+    return null;
+  }
+  return {
+    ...rally,
+    shots: Array.isArray(rally.shots) ? [...rally.shots] : [],
+    positions: rally.positions ? { ...rally.positions } : {},
+    metadata: rally.metadata ? { ...rally.metadata } : {},
+  };
 }
 
 function markdownToHtml(markdown) {
@@ -913,14 +942,34 @@ function highlightActiveRallyCard() {
   }
 }
 
+function syncBoundaryInputs(rally) {
+  if (!boundaryStartInput || !boundaryEndInput || !rally) {
+    return;
+  }
+  boundaryStartInput.value = fmt(rally.start_time, 1);
+  boundaryEndInput.value = fmt(rally.end_time, 1);
+  if (boundaryNote) {
+    boundaryNote.textContent =
+      "Preview only. Shot detection is not recomputed until saved boundary corrections are added.";
+  }
+}
+
 function selectRally(rally) {
-  activeRally = rally;
+  activeRally = cloneRallyForReview(rally);
+  selectedOriginalBounds = activeRally
+    ? {
+        start_time: Number(activeRally.start_time || 0),
+        end_time: Number(activeRally.end_time || 0),
+        duration_sec: Number(activeRally.duration_sec || 0),
+      }
+    : null;
   highlightActiveRallyCard();
   updateReviewMeta();
-  renderShotMarkers(rally);
-  renderSelectedRallyDetails(rally);
+  renderShotMarkers(activeRally);
+  renderSelectedRallyDetails(activeRally);
+  syncBoundaryInputs(activeRally);
 
-  const start = Number(rally.start_time || 0);
+  const start = Number(activeRally?.start_time || 0);
   rallyScrubber.value = "0";
   if (reviewVideo.readyState >= 1) {
     reviewVideo.currentTime = start;
@@ -929,11 +978,68 @@ function selectRally(rally) {
   }
 }
 
+function previewBoundaryBounds() {
+  if (!activeRally || !boundaryStartInput || !boundaryEndInput) {
+    return;
+  }
+  const start = parsePositiveNumber(boundaryStartInput.value, null);
+  const end = parsePositiveNumber(boundaryEndInput.value, null);
+  if (start === null || end === null || end <= start) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "Enter a valid end time greater than the start time.";
+    }
+    return;
+  }
+
+  activeRally = {
+    ...activeRally,
+    start_time: start,
+    end_time: end,
+    duration_sec: end - start,
+  };
+  updateReviewMeta();
+  renderShotMarkers(activeRally);
+  renderSelectedRallyDetails(activeRally);
+  rallyScrubber.value = "0";
+  if (reviewVideo.readyState >= 1) {
+    reviewVideo.currentTime = start;
+    drawReviewFrame();
+  }
+  updateShotCaption();
+  if (boundaryNote) {
+    boundaryNote.textContent =
+      "Previewing adjusted bounds locally. Rally cards and coaching metrics are unchanged.";
+  }
+}
+
+function resetBoundaryBounds() {
+  if (!activeRally || !selectedOriginalBounds) {
+    return;
+  }
+  activeRally = {
+    ...activeRally,
+    start_time: selectedOriginalBounds.start_time,
+    end_time: selectedOriginalBounds.end_time,
+    duration_sec: selectedOriginalBounds.duration_sec,
+  };
+  syncBoundaryInputs(activeRally);
+  updateReviewMeta();
+  renderShotMarkers(activeRally);
+  renderSelectedRallyDetails(activeRally);
+  rallyScrubber.value = "0";
+  if (reviewVideo.readyState >= 1) {
+    reviewVideo.currentTime = Number(activeRally.start_time || 0);
+    drawReviewFrame();
+  }
+  updateShotCaption();
+}
+
 function setupReviewPanel(data, rallies) {
   const sourceVideoUrl = data?.source_video_url;
   if (!sourceVideoUrl || !Array.isArray(rallies) || rallies.length === 0) {
     reviewPanel.classList.add("hidden");
     activeRally = null;
+    selectedOriginalBounds = null;
     clearChildren(selectedRallyKpis);
     clearChildren(selectedRallyShots);
     stopReviewLoop();
@@ -962,6 +1068,7 @@ async function submitAnalyze(event) {
   const maxRallies = document.getElementById("max-rallies").value.trim();
   const youtubeCacheDir = document.getElementById("youtube-cache").value.trim();
   const cvWorkersRaw = document.getElementById("cv-workers").value.trim();
+  const analysisStartMinuteRaw = document.getElementById("analysis-start-minute").value.trim();
   const maxVideoMinutesRaw = document.getElementById("max-video-minutes").value.trim();
 
   const motionThreshold = Number(document.getElementById("motion-threshold").value || "0.018");
@@ -970,6 +1077,7 @@ async function submitAnalyze(event) {
   const segmentFrameStep = Number(document.getElementById("segment-frame-step").value || "2");
   const trackingFrameStep = Number(document.getElementById("tracking-frame-step").value || "4");
   const cvWorkers = cvWorkersRaw ? Number(cvWorkersRaw) : null;
+  const analysisStartMinute = analysisStartMinuteRaw ? Number(analysisStartMinuteRaw) : 0;
   const maxVideoMinutes = maxVideoMinutesRaw ? Number(maxVideoMinutesRaw) : null;
 
   if (mode === "upload" && (!fileInput.files || fileInput.files.length === 0)) {
@@ -979,6 +1087,16 @@ async function submitAnalyze(event) {
 
   if (mode !== "upload" && !sourceInput.value.trim()) {
     setLoading(false, "Enter a YouTube URL or local file path.");
+    return;
+  }
+
+  if (!Number.isFinite(analysisStartMinute) || analysisStartMinute < 0) {
+    setLoading(false, "Start minute must be zero or greater.");
+    return;
+  }
+
+  if (maxVideoMinutes !== null && (!Number.isFinite(maxVideoMinutes) || maxVideoMinutes <= 0)) {
+    setLoading(false, "Analyze duration must be blank or greater than zero.");
     return;
   }
 
@@ -1003,6 +1121,7 @@ async function submitAnalyze(event) {
       body.append("idle_gap_sec", String(idleGapSec));
       body.append("segment_frame_step", String(segmentFrameStep));
       body.append("tracking_frame_step", String(trackingFrameStep));
+      body.append("analysis_start_minute", String(analysisStartMinute));
       if (cvWorkers !== null && Number.isFinite(cvWorkers) && cvWorkers > 0) {
         body.append("cv_workers", String(Math.round(cvWorkers)));
       }
@@ -1028,6 +1147,7 @@ async function submitAnalyze(event) {
         idle_gap_sec: idleGapSec,
         segment_frame_step: segmentFrameStep,
         tracking_frame_step: trackingFrameStep,
+        analysis_start_minute: analysisStartMinute,
       };
       if (cvWorkers !== null && Number.isFinite(cvWorkers) && cvWorkers > 0) {
         body.cv_workers = Math.round(cvWorkers);
@@ -1236,6 +1356,102 @@ function buildRallyChart(rallies) {
   rallyChart.innerHTML = svg;
 }
 
+function diagnosticValue(value, digits = 2) {
+  if (value === null || value === undefined || value === "") {
+    return "n/a";
+  }
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : fmt(value, digits);
+  }
+  return String(value);
+}
+
+function renderDiagnostics(diagnostics) {
+  if (!diagnosticsPanel || !diagnosticsCards || !segmentPreview) {
+    return;
+  }
+
+  const segmentation = diagnostics?.segmentation || null;
+  if (!segmentation) {
+    diagnosticsPanel.classList.add("hidden");
+    clearChildren(diagnosticsCards);
+    clearChildren(segmentPreview);
+    return;
+  }
+
+  diagnosticsPanel.classList.remove("hidden");
+  clearChildren(diagnosticsCards);
+  clearChildren(segmentPreview);
+
+  const motion = segmentation.motion || {};
+  const cards = [
+    {
+      label: "Analyzed Window",
+      value: `${diagnosticValue(segmentation.window_start_sec, 1)}s -> ${diagnosticValue(
+        segmentation.window_end_sec,
+        1
+      )}s`,
+      detail: `${diagnosticValue(segmentation.window_duration_sec, 1)}s total`,
+    },
+    {
+      label: "Final Rallies",
+      value: diagnosticValue(segmentation.final_segment_count, 0),
+      detail: `${diagnosticValue(segmentation.base_segment_count, 0)} base candidates`,
+    },
+    {
+      label: "Threshold",
+      value: diagnosticValue(segmentation.selected_threshold, 4),
+      detail: segmentation.adaptive_used ? "adaptive threshold used" : "base threshold used",
+    },
+    {
+      label: "Motion Samples",
+      value: diagnosticValue(motion.sample_count, 0),
+      detail: `${fmtPct(motion.active_sample_rate || 0)} active`,
+    },
+    {
+      label: "Frame Step",
+      value: diagnosticValue(segmentation.frame_step, 0),
+      detail: "higher is faster, lower is denser",
+    },
+    {
+      label: "Fallback",
+      value: segmentation.fallback_full_window_used ? "Used" : "No",
+      detail: segmentation.fallback_full_window_used
+        ? "no confident breaks found"
+        : "boundaries came from motion",
+    },
+  ];
+
+  for (const card of cards) {
+    const el = document.createElement("article");
+    el.className = "diagnostic-card";
+    el.innerHTML = `
+      <p class="diagnostic-label">${escapeHtml(card.label)}</p>
+      <p class="diagnostic-value">${escapeHtml(card.value)}</p>
+      <p class="diagnostic-detail">${escapeHtml(card.detail)}</p>
+    `;
+    diagnosticsCards.appendChild(el);
+  }
+
+  const finalSegments = Array.isArray(segmentation.final_segments)
+    ? segmentation.final_segments.slice(0, 40)
+    : [];
+  if (!finalSegments.length) {
+    segmentPreview.textContent = "No final segment candidates were emitted.";
+    return;
+  }
+
+  for (const [idx, segment] of finalSegments.entries()) {
+    const chip = document.createElement("span");
+    chip.className = "segment-chip";
+    chip.textContent = `R${idx + 1}: ${fmt(segment.start_sec, 1)}s -> ${fmt(
+      segment.end_sec,
+      1
+    )}s`;
+    segmentPreview.appendChild(chip);
+  }
+}
+
 function renderRallies(rallies, options = {}) {
   clearChildren(rallyList);
 
@@ -1394,6 +1610,7 @@ function renderAll(data) {
   renderTacticalBars(tactical);
   renderMovementCards(movement);
   buildRallyChart(rallies);
+  renderDiagnostics(timeline.diagnostics || {});
   allRallies = [...rallies];
   if (winnerFilter) {
     winnerFilter.value = "all";
@@ -1511,6 +1728,14 @@ for (const input of [winnerFilter, durationMinInput, durationMaxInput, shotsMinI
     continue;
   }
   input.addEventListener("change", onRallyFilterChange);
+}
+
+if (boundaryApplyBtn) {
+  boundaryApplyBtn.addEventListener("click", previewBoundaryBounds);
+}
+
+if (boundaryResetBtn) {
+  boundaryResetBtn.addEventListener("click", resetBoundaryBounds);
 }
 
 for (const input of [durationMinInput, durationMaxInput, shotsMinInput, shotsMaxInput]) {

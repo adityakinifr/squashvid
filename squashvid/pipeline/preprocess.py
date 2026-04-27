@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
 
 from squashvid.pipeline.models import Segment
 
-SEGMENTER_VERSION = "adaptive-v3-window-stable"
+SEGMENTER_VERSION = "adaptive-v4-diagnostics-window"
+
+
+@dataclass(slots=True)
+class SegmentationResult:
+    segments: list[Segment]
+    diagnostics: dict[str, Any]
 
 
 def read_video_metadata(video_path: str) -> dict[str, float | int]:
@@ -160,6 +168,7 @@ def _select_adaptive_threshold(
     idle_gap_sec: float,
     total_duration: float,
     max_rallies: int | None,
+    analysis_duration_sec: float | None = None,
 ) -> float | None:
     if len(motion_samples) < 20:
         return None
@@ -189,7 +198,12 @@ def _select_adaptive_threshold(
 
     best_threshold: float | None = None
     best_score = float("-inf")
-    long_limit = max(120.0, min(total_duration * 0.8, 240.0))
+    scoring_duration = (
+        float(analysis_duration_sec)
+        if analysis_duration_sec is not None and analysis_duration_sec > 0.0
+        else total_duration
+    )
+    long_limit = max(120.0, min(scoring_duration * 0.8, 240.0))
 
     for threshold in threshold_candidates:
         segments = _segments_from_motion_samples(
@@ -241,7 +255,49 @@ def _select_adaptive_threshold(
     return None
 
 
-def detect_active_segments(
+def _segments_diagnostic_payload(segments: list[Segment], limit: int = 80) -> list[dict[str, float]]:
+    return [
+        {
+            "start_sec": round(float(seg.start_sec), 3),
+            "end_sec": round(float(seg.end_sec), 3),
+            "duration_sec": round(float(seg.duration_sec), 3),
+        }
+        for seg in segments[:limit]
+    ]
+
+
+def _motion_diagnostic_payload(
+    motion_samples: list[tuple[float, float]],
+    threshold: float,
+) -> dict[str, float | int | None]:
+    if not motion_samples:
+        return {
+            "sample_count": 0,
+            "first_sample_sec": None,
+            "last_sample_sec": None,
+            "avg_motion": 0.0,
+            "median_motion": 0.0,
+            "p90_motion": 0.0,
+            "p95_motion": 0.0,
+            "max_motion": 0.0,
+            "active_sample_rate": 0.0,
+        }
+
+    ratios = np.array([sample[1] for sample in motion_samples], dtype=float)
+    return {
+        "sample_count": int(ratios.size),
+        "first_sample_sec": round(float(motion_samples[0][0]), 3),
+        "last_sample_sec": round(float(motion_samples[-1][0]), 3),
+        "avg_motion": round(float(ratios.mean()), 6),
+        "median_motion": round(float(np.median(ratios)), 6),
+        "p90_motion": round(float(np.percentile(ratios, 90)), 6),
+        "p95_motion": round(float(np.percentile(ratios, 95)), 6),
+        "max_motion": round(float(ratios.max()), 6),
+        "active_sample_rate": round(float(np.count_nonzero(ratios >= threshold) / ratios.size), 4),
+    }
+
+
+def detect_active_segments_with_diagnostics(
     video_path: str,
     motion_threshold: float = 0.018,
     min_rally_sec: float = 4.0,
@@ -251,7 +307,7 @@ def detect_active_segments(
     max_rallies: int | None = None,
     max_duration_sec: float | None = None,
     start_offset_sec: float = 0.0,
-) -> list[Segment]:
+) -> SegmentationResult:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video: {video_path}")
@@ -259,8 +315,8 @@ def detect_active_segments(
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0) or 30.0
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    # Seek to start offset if specified
     start_frame = 0
+    start_offset_sec = max(0.0, float(start_offset_sec))
     if start_offset_sec > 0.0:
         start_frame = int(start_offset_sec * fps)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -310,12 +366,16 @@ def detect_active_segments(
     cap.release()
 
     observed_duration = (index / fps) if fps else 0.0
-    total_duration = (frame_count / fps) if fps and frame_count > 0 else 0.0
-    total_duration = max(total_duration, observed_duration)
+    source_duration = (frame_count / fps) if fps and frame_count > 0 else 0.0
+    observed_end_sec = start_offset_sec + observed_duration
+    total_duration = source_duration if source_duration > 0.0 else observed_end_sec
+    total_duration = max(total_duration, observed_end_sec)
     if max_duration is not None:
-        total_duration = min(total_duration, max_duration)
+        total_duration = min(total_duration, start_offset_sec + max_duration)
+    total_duration = max(start_offset_sec, total_duration)
+    analysis_duration = max(0.0, total_duration - start_offset_sec)
 
-    segments = _segments_from_motion_samples(
+    base_segments = _segments_from_motion_samples(
         motion_samples=motion_samples,
         threshold=motion_threshold,
         min_rally_sec=min_rally_sec,
@@ -323,17 +383,24 @@ def detect_active_segments(
         total_duration=total_duration,
         max_rallies=None,
     )
+    segments = base_segments
+    selected_threshold = motion_threshold
+    adaptive_threshold: float | None = None
+    adaptive_used = False
 
     needs_adaptive = False
     if not segments:
         needs_adaptive = True
-    elif len(segments) == 1 and total_duration > 120.0:
-        needs_adaptive = segments[0].duration_sec > max(100.0, total_duration * 0.72)
+    elif len(segments) == 1 and analysis_duration > 120.0:
+        needs_adaptive = segments[0].duration_sec > max(100.0, analysis_duration * 0.72)
 
     if needs_adaptive:
-        adaptive_calibration_sec = min(total_duration, 8.0 * 60.0)
+        adaptive_calibration_sec = min(analysis_duration, 8.0 * 60.0)
+        calibration_end_sec = start_offset_sec + adaptive_calibration_sec
         calibration_samples = [
-            (ts, ratio) for ts, ratio in motion_samples if ts <= adaptive_calibration_sec
+            (ts, ratio)
+            for ts, ratio in motion_samples
+            if start_offset_sec <= ts <= calibration_end_sec
         ]
         if not calibration_samples:
             calibration_samples = motion_samples
@@ -343,8 +410,9 @@ def detect_active_segments(
             base_threshold=motion_threshold,
             min_rally_sec=min_rally_sec,
             idle_gap_sec=idle_gap_sec,
-            total_duration=adaptive_calibration_sec,
+            total_duration=calibration_end_sec,
             max_rallies=None,
+            analysis_duration_sec=adaptive_calibration_sec,
         )
         if adaptive_threshold is not None:
             adaptive_segments = _segments_from_motion_samples(
@@ -357,13 +425,17 @@ def detect_active_segments(
             )
             if len(adaptive_segments) >= 2:
                 segments = adaptive_segments
+                selected_threshold = adaptive_threshold
+                adaptive_used = True
 
     merge_gap_sec = min(2.4, max(idle_gap_sec * 1.5, idle_gap_sec + 0.5))
+    pre_merge_segments = segments
     segments = _merge_close_segments(
         segments=segments,
         merge_gap_sec=merge_gap_sec,
         max_rallies=None,
     )
+    merged_segments = segments
     segments = _extend_segment_tails(
         segments=segments,
         tail_pad_sec=min(1.4, idle_gap_sec + 0.2),
@@ -372,10 +444,67 @@ def detect_active_segments(
     )
 
     min_full_segment_sec = min(min_rally_sec, 1.0)
-    if not segments and total_duration >= min_full_segment_sec:
-        segments.append(Segment(start_sec=0.0, end_sec=total_duration))
+    fallback_used = False
+    if not segments and analysis_duration >= min_full_segment_sec:
+        segments.append(Segment(start_sec=start_offset_sec, end_sec=total_duration))
+        fallback_used = True
 
-    return segments[:max_rallies] if max_rallies is not None else segments
+    final_segments = segments[:max_rallies] if max_rallies is not None else segments
+    diagnostics = {
+        "version": SEGMENTER_VERSION,
+        "fps": round(float(fps), 3),
+        "frame_count": int(frame_count),
+        "frame_step": int(frame_step),
+        "source_duration_sec": round(float(source_duration), 3),
+        "window_start_sec": round(float(start_offset_sec), 3),
+        "window_end_sec": round(float(total_duration), 3),
+        "window_duration_sec": round(float(analysis_duration), 3),
+        "max_duration_sec": round(float(max_duration), 3) if max_duration is not None else None,
+        "requested_max_rallies": int(max_rallies) if max_rallies is not None else None,
+        "base_threshold": round(float(motion_threshold), 6),
+        "selected_threshold": round(float(selected_threshold), 6),
+        "adaptive_threshold": round(float(adaptive_threshold), 6)
+        if adaptive_threshold is not None
+        else None,
+        "adaptive_used": adaptive_used,
+        "fallback_full_window_used": fallback_used,
+        "merge_gap_sec": round(float(merge_gap_sec), 3),
+        "tail_pad_sec": round(float(min(1.4, idle_gap_sec + 0.2)), 3),
+        "base_segment_count": len(base_segments),
+        "pre_merge_segment_count": len(pre_merge_segments),
+        "merged_segment_count": len(merged_segments),
+        "final_segment_count": len(final_segments),
+        "motion": _motion_diagnostic_payload(motion_samples, selected_threshold),
+        "base_segments": _segments_diagnostic_payload(base_segments),
+        "pre_merge_segments": _segments_diagnostic_payload(pre_merge_segments),
+        "merged_segments": _segments_diagnostic_payload(merged_segments),
+        "final_segments": _segments_diagnostic_payload(final_segments),
+    }
+    return SegmentationResult(segments=final_segments, diagnostics=diagnostics)
+
+
+def detect_active_segments(
+    video_path: str,
+    motion_threshold: float = 0.018,
+    min_rally_sec: float = 4.0,
+    idle_gap_sec: float = 1.2,
+    downscale_width: int = 480,
+    frame_step: int = 2,
+    max_rallies: int | None = None,
+    max_duration_sec: float | None = None,
+    start_offset_sec: float = 0.0,
+) -> list[Segment]:
+    return detect_active_segments_with_diagnostics(
+        video_path=video_path,
+        motion_threshold=motion_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=idle_gap_sec,
+        downscale_width=downscale_width,
+        frame_step=frame_step,
+        max_rallies=max_rallies,
+        max_duration_sec=max_duration_sec,
+        start_offset_sec=start_offset_sec,
+    ).segments
 
 
 def clip_windows_from_segments(

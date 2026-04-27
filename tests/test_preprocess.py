@@ -22,6 +22,12 @@ class _FakeCapture:
             return float(self._frame_count)
         return 0.0
 
+    def set(self, prop: int, value: float) -> bool:  # noqa: N802 - OpenCV-like API.
+        if prop == preprocess.cv2.CAP_PROP_POS_FRAMES:
+            self._idx = max(0, min(len(self._frames), int(value)))
+            return True
+        return False
+
     def read(self) -> tuple[bool, np.ndarray | None]:  # noqa: N802 - OpenCV-like API.
         if self._idx >= len(self._frames):
             return False, None
@@ -76,6 +82,29 @@ def test_detect_active_segments_respects_max_duration(monkeypatch) -> None:
     assert len(segments) == 1
     assert segments[0].start_sec == 0.0
     assert segments[0].end_sec <= 2.5 + 0.05
+
+
+def test_detect_active_segments_respects_start_offset_window(monkeypatch) -> None:
+    frames = [np.zeros((120, 160, 3), dtype=np.uint8) for _ in range(600)]  # 60s @ 10fps
+    fake_cap = _FakeCapture(frames=frames, fps=10.0, frame_count=600)
+    monkeypatch.setattr(preprocess.cv2, "VideoCapture", lambda _: fake_cap)
+
+    result = preprocess.detect_active_segments_with_diagnostics(
+        video_path="/tmp/fake.mp4",
+        motion_threshold=0.99,
+        min_rally_sec=1.0,
+        idle_gap_sec=0.8,
+        frame_step=1,
+        start_offset_sec=30.0,
+        max_duration_sec=12.0,
+    )
+
+    assert len(result.segments) == 1
+    assert result.segments[0].start_sec == 30.0
+    assert result.segments[0].end_sec <= 42.0
+    assert result.diagnostics["window_start_sec"] == 30.0
+    assert result.diagnostics["window_end_sec"] == 42.0
+    assert result.diagnostics["fallback_full_window_used"] is True
 
 
 def test_adaptive_segments_can_recover_when_base_threshold_is_too_high() -> None:

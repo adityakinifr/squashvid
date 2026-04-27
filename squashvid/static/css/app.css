@@ -444,6 +444,53 @@ body {
   height: 220px;
 }
 
+.diagnostics-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.68rem;
+}
+
+.diagnostic-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.72rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(249, 110, 42, 0.12), transparent 34%),
+    linear-gradient(150deg, #fff, rgba(15, 111, 157, 0.06));
+}
+
+.diagnostic-label,
+.diagnostic-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.diagnostic-value {
+  margin: 0.18rem 0;
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+  font-size: 1.1rem;
+  font-weight: 650;
+  color: #123d50;
+}
+
+.segment-preview {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.42rem;
+}
+
+.segment-chip {
+  border: 1px dashed rgba(12, 24, 30, 0.25);
+  border-radius: 999px;
+  padding: 0.25rem 0.58rem;
+  background: rgba(255, 255, 255, 0.74);
+  color: #234756;
+  font-family: "IBM Plex Mono", "Menlo", monospace;
+  font-size: 0.75rem;
+}
+
 .rally-toolbar {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -516,6 +563,38 @@ body {
 .review-inline .panel-head h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.boundary-editor {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 0.8fr) auto auto minmax(180px, 1.4fr);
+  gap: 0.55rem;
+  align-items: end;
+  border: 1px dashed rgba(12, 24, 30, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem;
+  margin-bottom: 0.7rem;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.boundary-editor .field-group {
+  margin: 0;
+}
+
+.boundary-editor input {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.75rem;
+  background: #fff;
+  color: var(--text);
+}
+
+#boundary-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .rally-list {
@@ -1155,7 +1234,9 @@ pre {
 @media (max-width: 980px) {
   .settings-grid,
   .analytics-grid,
-  .insight-columns {
+  .insight-columns,
+  .diagnostics-cards,
+  .boundary-editor {
     grid-template-columns: 1fr;
   }
 
