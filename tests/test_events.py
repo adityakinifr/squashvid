@@ -67,6 +67,13 @@ def test_rally_and_match_aggregation() -> None:
     assert rally.positions.A_court_coverage is not None
     assert rally.positions.A_avg_speed is not None
     assert rally.positions.A_late_retrievals is not None
+    assert rally.metadata["outcome_model"]["category"] in {
+        "winner",
+        "forced_error",
+        "pressure",
+        "unknown",
+    }
+    assert "intensity_score" in rally.metadata["pressure"]
 
     timeline = aggregate_match(
         video_path="/tmp/demo.mp4",
@@ -80,3 +87,8 @@ def test_rally_and_match_aggregation() -> None:
     assert "A_court_coverage" in timeline.movement_summary
     assert "A_avg_speed" in timeline.movement_summary
     assert "A_late_retrievals" in timeline.movement_summary
+    intelligence = timeline.diagnostics["match_intelligence"]
+    assert intelligence["version"] == "match-intelligence-v1"
+    assert "player_profiles" in intelligence
+    assert timeline.diagnostics["review_pack"]["version"] == "review-pack-v1"
+    assert timeline.diagnostics["review_pack"]["highlights"]

@@ -17,19 +17,63 @@
     <div class="glow glow-1" aria-hidden="true"></div>
     <div class="glow glow-2" aria-hidden="true"></div>
 
+    <nav class="topbar" aria-label="Primary">
+      <a class="brand" href="#">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>SquashVid</span>
+      </a>
+      <div class="topbar-links">
+        <a href="#results">Dashboard</a>
+        <a href="#intelligence-panel">Intelligence</a>
+        <a href="#review-panel">Rally Review</a>
+      </div>
+      <span class="system-pill">
+        <span class="live-dot" aria-hidden="true"></span>
+        CV pipeline ready
+      </span>
+    </nav>
+
     <main class="layout">
       <header class="hero reveal" style="--stagger: 0">
-        <p class="badge">CV + LLM Match Intel</p>
-        <h1>SquashVid</h1>
-        <p class="subtitle">
-          Upload a match clip, paste a local path, or analyze straight from YouTube.
-          Get rally-level breakdowns, tactical trends, and coaching actions in one
-          visual report.
-        </p>
+        <div class="hero-copy">
+          <p class="badge">CV + LLM Match Intel</p>
+          <h1>Squash video, translated into coaching decisions.</h1>
+          <p class="subtitle">
+            Analyze YouTube matches or local clips into rally windows, movement patterns,
+            tactical pressure, and review-ready coaching actions.
+          </p>
+          <div class="hero-actions">
+            <a class="hero-link primary-link" href="#analyze-form">Start analysis</a>
+            <a class="hero-link" href="#intelligence-panel">View intelligence model</a>
+          </div>
+        </div>
+        <div class="hero-board" aria-label="Analysis workflow">
+          <div class="hero-stat main">
+            <span class="hero-stat-label">Pipeline</span>
+            <strong>Rally → Track → Coach</strong>
+            <small>Segmentation, movement map, tactical flags, review pack</small>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-stat-label">Output</span>
+            <strong>Cards + exports</strong>
+          </div>
+          <div class="hero-stat">
+            <span class="hero-stat-label">Review</span>
+            <strong>Clip windows</strong>
+          </div>
+        </div>
       </header>
 
       <section class="panel controls reveal" style="--stagger: 1" aria-label="Analyze video">
         <form id="analyze-form" novalidate>
+          <div class="control-head">
+            <div>
+              <p class="eyebrow">Source setup</p>
+              <h2>Analyze a match</h2>
+            </div>
+            <p>Keep defaults for a fast first pass. Tune CV thresholds only when segmentation needs correction.</p>
+          </div>
+
           <div class="mode-row" role="radiogroup" aria-label="Video source type">
             <label class="mode-pill">
               <input type="radio" name="source_mode" value="youtube" checked />
@@ -45,20 +89,22 @@
             </label>
           </div>
 
-          <div id="path-group" class="field-group">
-            <label for="source-input">Video Path or URL</label>
-            <input
-              id="source-input"
-              name="source_input"
-              type="text"
-              value="https://www.youtube.com/watch?v=VIDEO_ID"
-              autocomplete="off"
-            />
-          </div>
+          <div class="source-card">
+            <div id="path-group" class="field-group">
+              <label for="source-input">Video Path or URL</label>
+              <input
+                id="source-input"
+                name="source_input"
+                type="text"
+                value="https://www.youtube.com/watch?v=VIDEO_ID"
+                autocomplete="off"
+              />
+            </div>
 
-          <div id="upload-group" class="field-group hidden">
-            <label for="video-file">Video File</label>
-            <input id="video-file" name="video_file" type="file" accept="video/*" />
+            <div id="upload-group" class="field-group hidden">
+              <label for="video-file">Video File</label>
+              <input id="video-file" name="video_file" type="file" accept="video/*" />
+            </div>
           </div>
 
           <div class="settings-grid">
@@ -105,7 +151,10 @@
           </div>
 
           <details class="advanced">
-            <summary>Advanced CV Thresholds</summary>
+            <summary>
+              <span>Advanced CV controls</span>
+              <small>thresholds, workers, calibration</small>
+            </summary>
             <div class="settings-grid advanced-grid">
               <div class="field-group compact">
                 <label for="motion-threshold">Motion Threshold</label>
@@ -179,6 +228,13 @@
       </section>
 
       <section id="results" class="results hidden" aria-live="polite">
+        <nav class="results-nav" aria-label="Dashboard sections">
+          <a href="#results">Snapshot</a>
+          <a href="#intelligence-panel">Intelligence</a>
+          <a href="#review-panel">Review</a>
+          <a href="#insight-panel">Coaching</a>
+        </nav>
+
         <article class="panel summary reveal" style="--stagger: 2">
           <div class="panel-head">
             <h2>Match Snapshot</h2>
@@ -212,7 +268,39 @@
           <div id="rally-chart" class="chart-wrap"></div>
         </article>
 
-        <article id="diagnostics-panel" class="panel diagnostics reveal hidden" style="--stagger: 5">
+        <article id="intelligence-panel" class="panel intelligence reveal hidden" style="--stagger: 5">
+          <div class="panel-head">
+            <h2>Match Intelligence</h2>
+            <p>Outcome model, repeated sequences, risk flags, and review priorities</p>
+          </div>
+          <div id="intelligence-cards" class="intelligence-cards"></div>
+          <div class="intelligence-columns">
+            <div>
+              <h3>Repeated Sequences</h3>
+              <div id="sequence-list" class="mini-card-list"></div>
+            </div>
+            <div>
+              <h3>Risk Flags</h3>
+              <div id="risk-list" class="mini-card-list"></div>
+            </div>
+          </div>
+          <div class="review-pack-section">
+            <div class="review-pack-head">
+              <div>
+                <h3>Coach Review Pack</h3>
+                <p>High-leverage rallies selected for multimodal or manual coach review</p>
+              </div>
+              <div class="export-actions">
+                <button id="export-analysis-btn" type="button" class="secondary">Export JSON</button>
+                <button id="export-report-btn" type="button" class="secondary">Export Report</button>
+                <button id="export-review-pack-btn" type="button" class="secondary">Export Review Pack</button>
+              </div>
+            </div>
+            <div id="review-pack-list" class="review-pack-list"></div>
+          </div>
+        </article>
+
+        <article id="diagnostics-panel" class="panel diagnostics reveal hidden" style="--stagger: 6">
           <div class="panel-head">
             <h2>Segmentation Diagnostics</h2>
             <p>How the rally boundaries were chosen</p>
@@ -221,7 +309,7 @@
           <div id="segment-preview" class="segment-preview"></div>
         </article>
 
-        <article class="panel rallies reveal" style="--stagger: 6">
+        <article class="panel rallies reveal" style="--stagger: 7">
           <div class="panel-head">
             <h2>Rally Timeline</h2>
             <p>Shot sequence, movement, and outcome by rally</p>
@@ -327,7 +415,7 @@
           <div id="rally-list" class="rally-list"></div>
         </article>
 
-        <article id="insight-panel" class="panel insight reveal hidden" style="--stagger: 7">
+        <article id="insight-panel" class="panel insight reveal hidden" style="--stagger: 8">
           <div class="panel-head">
             <h2>Coaching Insight</h2>
             <p id="insight-model"></p>
@@ -349,7 +437,7 @@
           </details>
         </article>
 
-        <article class="panel raw reveal" style="--stagger: 8">
+        <article class="panel raw reveal" style="--stagger: 9">
           <details>
             <summary>Raw JSON</summary>
             <pre id="raw-json"></pre>

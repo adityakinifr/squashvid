@@ -17,12 +17,15 @@ Focus on:
 4) differences between early and late rallies,
 5) five concrete coaching adjustments.
 Do not only summarize points. Identify recurring causes of lost rallies.
+Use match_intelligence/review_pack diagnostics when present to prioritize high-leverage rallies.
 """.strip()
 
 
 def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
     tactical = timeline.tactical_patterns
     movement = timeline.movement_summary
+    intelligence = timeline.diagnostics.get("match_intelligence", {})
+    review_pack = timeline.diagnostics.get("review_pack", {})
     rally_count = len(timeline.rallies)
 
     key_patterns = [
@@ -53,6 +56,21 @@ def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
         key_patterns.append(
             f"Late retrieval proxy counts are Player A {a_late:.0f} vs Player B {b_late:.0f}; review the rallies with clustered late recoveries."
         )
+    if isinstance(intelligence, dict):
+        sequences = intelligence.get("sequence_patterns", [])
+        if isinstance(sequences, list) and sequences:
+            first = sequences[0]
+            if isinstance(first, dict):
+                key_patterns.append(
+                    f"Most repeated shot sequence proxy: {first.get('sequence', 'n/a')} ({first.get('count', 0)} occurrences)."
+                )
+        risks = intelligence.get("risk_flags", [])
+        if isinstance(risks, list) and risks:
+            risk = risks[0]
+            if isinstance(risk, dict):
+                key_patterns.append(
+                    f"Primary risk flag: Player {risk.get('player', '?')} {risk.get('label', 'risk')} - {risk.get('detail', '')}"
+                )
 
     drills = [
         "Ghosting with split-step timing: 6x90 seconds, focus on immediate T recovery.",
@@ -85,6 +103,18 @@ def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
         "### Coaching Adjustments",
         *[f"- {item}" for item in drills],
     ]
+    if isinstance(review_pack, dict) and review_pack.get("highlights"):
+        report_lines.extend(
+            [
+                "",
+                "### Review Pack",
+                *[
+                    f"- Rally {item.get('rally_id')}: {item.get('focus')}"
+                    for item in review_pack.get("highlights", [])[:5]
+                    if isinstance(item, dict)
+                ],
+            ]
+        )
 
     return CoachingInsight(
         model="local-heuristic",

@@ -14,6 +14,8 @@ This project implements the architecture you described:
 - Splits a full match video into rally candidates.
 - Extracts per-rally shot proxies (drive, crosscourt, volley drop, boast).
 - Computes movement proxies (T recovery, T occupancy, court coverage, normalized speed, late retrievals).
+- Builds match-intelligence diagnostics (outcome proxy, phase drift, repeated shot sequences, player pressure profiles).
+- Produces a coach review pack with high-leverage rally windows and a multimodal review prompt.
 - Aggregates tactical counters:
   - `backhand_pressure_rate`
   - `boast_usage`
@@ -116,6 +118,8 @@ UI includes a **Rally Review Scrubber**:
 - advanced controls include CV worker-process count, start minute, and optional duration
 - optional court calibration lets you override court crop and T position with normalized frame coordinates
 - selected rally details include a court-normalized movement map and expanded movement tags
+- match intelligence panel shows outcome split, player pressure profiles, repeated sequences, risk flags, and phase drift
+- coach review pack selects high-leverage rallies and exports JSON/report artifacts for follow-up review
 - segmentation diagnostics show analyzed window, threshold choice, signal source, bridge behavior, motion preview, candidate segments, and fallback usage
 
 Analyze by file path:
@@ -200,9 +204,16 @@ curl -X POST http://localhost:8000/analyze/upload \
     "A_late_retrievals": 2,
     "B_late_retrievals": 4
   },
-  "outcome": "A winner"
+  "outcome": "A winner",
+  "metadata": {
+    "outcome_model": {"winner": "A", "loser": "B", "category": "winner"},
+    "pressure": {"intensity_score": 0.64, "flags": [{"label": "Long Rally"}]}
+  }
 }
 ```
+
+`timeline.diagnostics.match_intelligence` contains player profiles, phase splits, repeated sequence patterns, risk flags, and `review_pack`.
+`timeline.diagnostics.review_pack` contains highlighted rally windows plus a prompt suitable for manual or multimodal review.
 
 ## Important Limitations
 
@@ -214,5 +225,5 @@ curl -X POST http://localhost:8000/analyze/upload \
 
 1. Replace heuristic ball tracking with a squash-specific detector/tracker.
 2. Add pose estimation and footwork labels (lunge, split-step timing).
-3. Train a rally outcome classifier (winner / forced / unforced error).
-4. Feed selected clips + structured timeline to a multimodal model for higher-fidelity coaching.
+3. Replace the heuristic outcome proxy with a trained rally outcome classifier (winner / forced / unforced error).
+4. Feed review-pack clips + structured timeline to a multimodal model for higher-fidelity coaching.

@@ -14,6 +14,14 @@ const kpiGrid = document.getElementById("kpi-grid");
 const tacticalBars = document.getElementById("tactical-bars");
 const movementCards = document.getElementById("movement-cards");
 const rallyChart = document.getElementById("rally-chart");
+const intelligencePanel = document.getElementById("intelligence-panel");
+const intelligenceCards = document.getElementById("intelligence-cards");
+const sequenceList = document.getElementById("sequence-list");
+const riskList = document.getElementById("risk-list");
+const reviewPackList = document.getElementById("review-pack-list");
+const exportAnalysisBtn = document.getElementById("export-analysis-btn");
+const exportReportBtn = document.getElementById("export-report-btn");
+const exportReviewPackBtn = document.getElementById("export-review-pack-btn");
 const diagnosticsPanel = document.getElementById("diagnostics-panel");
 const diagnosticsCards = document.getElementById("diagnostics-cards");
 const segmentPreview = document.getElementById("segment-preview");
@@ -1837,6 +1845,149 @@ function renderMovementCards(movement) {
   }
 }
 
+function topMixLabel(mix) {
+  if (!mix || typeof mix !== "object") {
+    return "n/a";
+  }
+  const [top] = Object.entries(mix).sort((a, b) => Number(b[1]) - Number(a[1]));
+  if (!top) {
+    return "n/a";
+  }
+  return `${top[0]} ${fmtPct(top[1])}`;
+}
+
+function renderProfileCard(label, profile) {
+  const card = document.createElement("article");
+  card.className = "intelligence-card player-profile-card";
+  card.innerHTML = `
+    <p class="intelligence-label">${escapeHtml(playerLabel(label))}</p>
+    <p class="intelligence-value">${escapeHtml(formatMetricValue(profile?.winner_rate, "pct"))}</p>
+    <div class="profile-grid">
+      <span>Pressure ${escapeHtml(formatMetricValue(profile?.pressure_index, "pct"))}</span>
+      <span>T ${escapeHtml(formatMetricValue(profile?.avg_t_occupancy, "pct"))}</span>
+      <span>Coverage ${escapeHtml(formatMetricValue(profile?.avg_court_coverage, "pct"))}</span>
+      <span>Late ${escapeHtml(formatMetricValue(profile?.late_retrievals, "count"))}</span>
+      <span>Top shot ${escapeHtml(topMixLabel(profile?.shot_mix))}</span>
+      <span>Top side ${escapeHtml(topMixLabel(profile?.side_mix))}</span>
+    </div>
+  `;
+  return card;
+}
+
+function renderIntelligence(diagnostics) {
+  const intelligence = diagnostics?.match_intelligence || null;
+  const reviewPack = diagnostics?.review_pack || intelligence?.review_pack || null;
+  if (!intelligencePanel || !intelligence || typeof intelligence !== "object") {
+    intelligencePanel?.classList.add("hidden");
+    return;
+  }
+
+  intelligencePanel.classList.remove("hidden");
+  clearChildren(intelligenceCards);
+  clearChildren(sequenceList);
+  clearChildren(riskList);
+  clearChildren(reviewPackList);
+
+  const outcome = intelligence.outcome_summary || {};
+  const phase = intelligence.phase_splits || {};
+  const profiles = intelligence.player_profiles || {};
+  const outcomeCard = document.createElement("article");
+  outcomeCard.className = "intelligence-card outcome-card";
+  outcomeCard.innerHTML = `
+    <p class="intelligence-label">Resolved Outcomes</p>
+    <p class="intelligence-value">${escapeHtml(String((outcome.A_wins || 0) + (outcome.B_wins || 0)))}</p>
+    <div class="profile-grid">
+      <span>${escapeHtml(playerNames.A)} wins ${escapeHtml(String(outcome.A_wins || 0))}</span>
+      <span>${escapeHtml(playerNames.B)} wins ${escapeHtml(String(outcome.B_wins || 0))}</span>
+      <span>Unknown ${escapeHtml(String(outcome.unknown || 0))}</span>
+    </div>
+  `;
+  intelligenceCards.appendChild(outcomeCard);
+  intelligenceCards.appendChild(renderProfileCard("A", profiles.A || {}));
+  intelligenceCards.appendChild(renderProfileCard("B", profiles.B || {}));
+
+  const phaseCard = document.createElement("article");
+  phaseCard.className = "intelligence-card phase-card";
+  const phaseRows = ["early", "middle", "late", "single"]
+    .filter((key) => phase[key])
+    .map(
+      (key) =>
+        `<span>${escapeHtml(key)}: ${escapeHtml(fmt(phase[key].avg_duration_sec, 1))}s, ${escapeHtml(fmt(phase[key].avg_shots, 1))} shots</span>`
+    )
+    .join("");
+  phaseCard.innerHTML = `
+    <p class="intelligence-label">Phase Drift</p>
+    <p class="intelligence-value">${escapeHtml(String(Object.keys(phase).length || 0))}</p>
+    <div class="profile-grid">${phaseRows || "<span>n/a</span>"}</div>
+  `;
+  intelligenceCards.appendChild(phaseCard);
+
+  const sequences = Array.isArray(intelligence.sequence_patterns)
+    ? intelligence.sequence_patterns
+    : [];
+  if (!sequences.length) {
+    const empty = document.createElement("article");
+    empty.className = "mini-card empty";
+    empty.textContent = "No repeated shot sequences found yet.";
+    sequenceList.appendChild(empty);
+  } else {
+    for (const sequence of sequences.slice(0, 6)) {
+      const card = document.createElement("article");
+      card.className = "mini-card sequence-card";
+      card.innerHTML = `
+        <p class="mini-card-title">${escapeHtml(sequence.sequence || "Sequence")}</p>
+        <p class="mini-card-body">${escapeHtml(String(sequence.count || 0))} occurrences | ${escapeHtml(formatMetricValue(sequence.rally_rate, "pct"))} rally rate</p>
+      `;
+      sequenceList.appendChild(card);
+    }
+  }
+
+  const risks = Array.isArray(intelligence.risk_flags) ? intelligence.risk_flags : [];
+  if (!risks.length) {
+    const empty = document.createElement("article");
+    empty.className = "mini-card empty";
+    empty.textContent = "No high-confidence risk flags from the current heuristics.";
+    riskList.appendChild(empty);
+  } else {
+    for (const risk of risks.slice(0, 6)) {
+      const card = document.createElement("article");
+      card.className = `mini-card risk-card severity-${escapeHtml(risk.severity || "medium")}`;
+      card.innerHTML = `
+        <p class="mini-card-title">${escapeHtml(playerLabel(risk.player))}: ${escapeHtml(risk.label || "Risk")}</p>
+        <p class="mini-card-body">${escapeHtml(risk.detail || "")}</p>
+      `;
+      riskList.appendChild(card);
+    }
+  }
+
+  const highlights = Array.isArray(reviewPack?.highlights) ? reviewPack.highlights : [];
+  if (!highlights.length) {
+    const empty = document.createElement("article");
+    empty.className = "review-highlight empty";
+    empty.textContent = "No review highlights were generated.";
+    reviewPackList.appendChild(empty);
+  } else {
+    for (const item of highlights) {
+      const card = document.createElement("article");
+      card.className = "review-highlight";
+      const reasons = Array.isArray(item.reasons) ? item.reasons.join(" | ") : "";
+      card.innerHTML = `
+        <div>
+          <p class="review-highlight-rank">#${escapeHtml(String(item.rank || ""))} Rally ${escapeHtml(String(item.rally_id || ""))}</p>
+          <p class="review-highlight-focus">${escapeHtml(withNamedPlayers(item.focus || "Review tactical and movement details."))}</p>
+          <p class="review-highlight-meta">${escapeHtml(fmt(item.clip_start_sec, 1))}s -> ${escapeHtml(fmt(item.clip_end_sec, 1))}s | ${escapeHtml(reasons)}</p>
+        </div>
+        <button type="button" class="secondary review-jump">Open Rally</button>
+      `;
+      card.querySelector(".review-jump")?.addEventListener("click", () => {
+        jumpToRallyById(Number(item.rally_id || 0));
+        reviewPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      reviewPackList.appendChild(card);
+    }
+  }
+}
+
 function buildRallyChart(rallies) {
   clearChildren(rallyChart);
 
@@ -2285,6 +2436,7 @@ function renderAll(data) {
   renderTacticalBars(tactical);
   renderMovementCards(movement);
   buildRallyChart(rallies);
+  renderIntelligence(timeline.diagnostics || {});
   renderDiagnostics(timeline.diagnostics || {});
   allRallies = [...rallies];
   if (winnerFilter) {
@@ -2488,11 +2640,62 @@ function rerenderWithCurrentResult() {
   renderAll(currentResult);
 }
 
+function downloadTextFile(filename, content, mimeType = "text/plain") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportAnalysisJson() {
+  if (!currentResult) {
+    setLoading(false, "Run an analysis before exporting.");
+    return;
+  }
+  downloadTextFile("squashvid-analysis.json", JSON.stringify(currentResult, null, 2), "application/json");
+}
+
+function exportReportMarkdown() {
+  if (!currentResult) {
+    setLoading(false, "Run an analysis before exporting.");
+    return;
+  }
+  const report = currentResult.insight?.report_markdown || "# SquashVid Report\n\nNo coaching report was generated.";
+  const reviewPack = currentResult.timeline?.diagnostics?.review_pack || {};
+  const prompt = reviewPack.multimodal_prompt
+    ? `\n\n## Multimodal Review Prompt\n\n${reviewPack.multimodal_prompt}\n`
+    : "";
+  downloadTextFile("squashvid-report.md", `${report}${prompt}`, "text/markdown");
+}
+
+function exportReviewPackJson() {
+  if (!currentResult) {
+    setLoading(false, "Run an analysis before exporting.");
+    return;
+  }
+  const reviewPack = currentResult.timeline?.diagnostics?.review_pack || {};
+  downloadTextFile("squashvid-review-pack.json", JSON.stringify(reviewPack, null, 2), "application/json");
+}
+
 if (playerANameInput) {
   playerANameInput.addEventListener("change", rerenderWithCurrentResult);
 }
 if (playerBNameInput) {
   playerBNameInput.addEventListener("change", rerenderWithCurrentResult);
+}
+if (exportAnalysisBtn) {
+  exportAnalysisBtn.addEventListener("click", exportAnalysisJson);
+}
+if (exportReportBtn) {
+  exportReportBtn.addEventListener("click", exportReportMarkdown);
+}
+if (exportReviewPackBtn) {
+  exportReviewPackBtn.addEventListener("click", exportReviewPackJson);
 }
 
 setMode(activeMode());

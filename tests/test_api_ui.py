@@ -15,6 +15,8 @@ def test_ui_home_and_assets() -> None:
     assert "SquashVid" in home.text
     assert "Court Left" in home.text
     assert "shot-type-filter" in home.text
+    assert "Match Intelligence" in home.text
+    assert "export-review-pack-btn" in home.text
 
     css = client.get("/static/css/app.css")
     js = client.get("/static/js/app.js")

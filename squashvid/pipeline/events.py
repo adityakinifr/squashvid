@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from statistics import mean
 
 import numpy as np
@@ -293,6 +293,78 @@ def _infer_outcome(track: SegmentTrack, shots: list[ShotEvent]) -> str:
     return f"{opponent} forced error"
 
 
+def _outcome_model(outcome: str) -> dict[str, object]:
+    raw = str(outcome or "unknown")
+    model: dict[str, object] = {
+        "winner": None,
+        "loser": None,
+        "category": "unknown",
+        "confidence": "low",
+        "reason": "Outcome could not be inferred from terminal ball/player geometry.",
+    }
+    if raw.startswith("A winner"):
+        model.update(
+            {
+                "winner": "A",
+                "loser": "B",
+                "category": "winner",
+                "confidence": "medium",
+                "reason": "Terminal ball position was far from the opponent.",
+            }
+        )
+    elif raw.startswith("B winner"):
+        model.update(
+            {
+                "winner": "B",
+                "loser": "A",
+                "category": "winner",
+                "confidence": "medium",
+                "reason": "Terminal ball position was far from the opponent.",
+            }
+        )
+    elif raw.startswith("A forced error"):
+        model.update(
+            {
+                "winner": "B",
+                "loser": "A",
+                "category": "forced_error",
+                "confidence": "low",
+                "reason": "Terminal exchange stayed near the opponent but ended after pressure.",
+            }
+        )
+    elif raw.startswith("B forced error"):
+        model.update(
+            {
+                "winner": "A",
+                "loser": "B",
+                "category": "forced_error",
+                "confidence": "low",
+                "reason": "Terminal exchange stayed near the opponent but ended after pressure.",
+            }
+        )
+    elif raw.startswith("A pressure"):
+        model.update(
+            {
+                "winner": "A",
+                "loser": "B",
+                "category": "pressure",
+                "confidence": "low",
+                "reason": "Last classified shot belonged to A but terminal geometry was ambiguous.",
+            }
+        )
+    elif raw.startswith("B pressure"):
+        model.update(
+            {
+                "winner": "B",
+                "loser": "A",
+                "category": "pressure",
+                "confidence": "low",
+                "reason": "Last classified shot belonged to B but terminal geometry was ambiguous.",
+            }
+        )
+    return model
+
+
 def _focus_crop_metadata(track: SegmentTrack) -> dict[str, float]:
     frame_w, frame_h = track.frame_size
     if frame_w <= 0 or frame_h <= 0:
@@ -373,13 +445,49 @@ def _focus_crop_metadata(track: SegmentTrack) -> dict[str, float]:
     }
 
 
+def _rally_pressure_features(
+    shots: list[ShotEvent],
+    positions: RallyPositions,
+    duration_sec: float,
+) -> dict[str, object]:
+    shot_count = len(shots)
+    duration_score = min(1.0, duration_sec / 35.0)
+    shot_score = min(1.0, shot_count / 18.0)
+    late_total = float((positions.A_late_retrievals or 0) + (positions.B_late_retrievals or 0))
+    coverage_total = float((positions.A_court_coverage or 0.0) + (positions.B_court_coverage or 0.0))
+    intensity = min(1.0, (duration_score * 0.34) + (shot_score * 0.34) + min(1.0, late_total / 8.0) * 0.2 + min(1.0, coverage_total) * 0.12)
+
+    flags: list[dict[str, object]] = []
+    if duration_sec >= 25.0:
+        flags.append({"label": "Long Rally", "tone": "stamina", "detail": f"{duration_sec:.1f}s rally duration."})
+    if shot_count >= 12:
+        flags.append({"label": "Extended Exchange", "tone": "tactical", "detail": f"{shot_count} classified shots."})
+    if (positions.A_late_retrievals or 0) >= 3:
+        flags.append({"label": "A Late Retrieval Cluster", "tone": "movement", "detail": "A had repeated fast recoveries away from the T."})
+    if (positions.B_late_retrievals or 0) >= 3:
+        flags.append({"label": "B Late Retrieval Cluster", "tone": "movement", "detail": "B had repeated fast recoveries away from the T."})
+    if any(shot.side == "backhand" for shot in shots[-4:]):
+        flags.append({"label": "Late Backhand Pressure", "tone": "pressure", "detail": "Backhand-side shots appeared in the final exchange."})
+    if any(shot.type in {"boast", "volley drop", "drop"} for shot in shots[-4:]):
+        flags.append({"label": "Short-Ball Finish", "tone": "attack", "detail": "Short-court shot appeared late in the rally."})
+
+    return {
+        "intensity_score": round(float(intensity), 4),
+        "duration_score": round(float(duration_score), 4),
+        "shot_score": round(float(shot_score), 4),
+        "flags": flags,
+    }
+
+
 def rally_from_track(track: SegmentTrack, rally_id: int) -> RallySummary:
     shots = infer_shots(track)
     positions = _compute_t_metrics(track, shots)
     focus_crop = _focus_crop_metadata(track)
+    outcome = _infer_outcome(track, shots)
     avg_motion = (
         mean(obs.motion_ratio for obs in track.observations) if track.observations else 0.0
     )
+    pressure = _rally_pressure_features(shots, positions, track.segment.duration_sec)
 
     return RallySummary(
         rally_id=rally_id,
@@ -388,15 +496,305 @@ def rally_from_track(track: SegmentTrack, rally_id: int) -> RallySummary:
         duration_sec=track.segment.duration_sec,
         shots=shots,
         positions=positions,
-        outcome=_infer_outcome(track, shots),
+        outcome=outcome,
         metadata={
             "avg_motion": round(float(avg_motion), 5),
             "shot_count": len(shots),
             "frame_samples": len(track.observations),
             "focus_crop_norm": focus_crop,
             "movement": _movement_metadata(track),
+            "outcome_model": _outcome_model(outcome),
+            "pressure": pressure,
+            "tactical_flags": pressure["flags"],
         },
     )
+
+
+def _rate(count: int, total: int) -> float:
+    return (count / total) if total else 0.0
+
+
+def _shot_mix(shots: list[ShotEvent], attr: str) -> dict[str, float]:
+    values = [str(getattr(shot, attr) or "unknown") for shot in shots]
+    counts = Counter(values)
+    total = sum(counts.values())
+    return {key: round(_rate(value, total), 4) for key, value in sorted(counts.items())}
+
+
+def _rally_winner(rally: RallySummary) -> str | None:
+    model = rally.metadata.get("outcome_model", {}) if rally.metadata else {}
+    winner = model.get("winner") if isinstance(model, dict) else None
+    return str(winner) if winner in {"A", "B"} else None
+
+
+def _phase_label(index: int, total: int) -> str:
+    if total <= 1:
+        return "single"
+    ratio = index / max(1, total - 1)
+    if ratio < 0.34:
+        return "early"
+    if ratio < 0.67:
+        return "middle"
+    return "late"
+
+
+def _phase_summary(rallies: list[RallySummary]) -> dict[str, dict[str, float]]:
+    buckets: dict[str, list[RallySummary]] = defaultdict(list)
+    for idx, rally in enumerate(rallies):
+        phase = _phase_label(idx, len(rallies))
+        rally.metadata["phase"] = phase
+        buckets[phase].append(rally)
+
+    summary: dict[str, dict[str, float]] = {}
+    for phase, rows in buckets.items():
+        shot_total = sum(len(rally.shots) for rally in rows)
+        short_total = sum(
+            1
+            for rally in rows
+            for shot in rally.shots
+            if shot.type in {"boast", "volley drop", "drop"}
+        )
+        backhand_total = sum(
+            1
+            for rally in rows
+            for shot in rally.shots
+            if shot.side == "backhand"
+        )
+        summary[phase] = {
+            "rallies": float(len(rows)),
+            "avg_duration_sec": round(mean(rally.duration_sec for rally in rows), 4) if rows else 0.0,
+            "avg_shots": round(mean(len(rally.shots) for rally in rows), 4) if rows else 0.0,
+            "backhand_rate": round(_rate(backhand_total, shot_total), 4),
+            "short_attack_rate": round(_rate(short_total, shot_total), 4),
+        }
+    return summary
+
+
+def _player_profiles(rallies: list[RallySummary]) -> dict[str, dict[str, object]]:
+    profiles: dict[str, dict[str, object]] = {}
+    for label in ("A", "B"):
+        won = [rally for rally in rallies if _rally_winner(rally) == label]
+        lost = [rally for rally in rallies if _rally_winner(rally) not in {None, label}]
+        player_shots = [shot for rally in rallies for shot in rally.shots if shot.player.value == label]
+        t_values = [
+            getattr(rally.positions, f"{label}_T_occupancy")
+            for rally in rallies
+            if getattr(rally.positions, f"{label}_T_occupancy") is not None
+        ]
+        coverage_values = [
+            getattr(rally.positions, f"{label}_court_coverage")
+            for rally in rallies
+            if getattr(rally.positions, f"{label}_court_coverage") is not None
+        ]
+        late_retrievals = sum(
+            int(getattr(rally.positions, f"{label}_late_retrievals") or 0)
+            for rally in rallies
+        )
+        avg_speed_values = [
+            getattr(rally.positions, f"{label}_avg_speed")
+            for rally in rallies
+            if getattr(rally.positions, f"{label}_avg_speed") is not None
+        ]
+        pressure_index = min(
+            1.0,
+            (1.0 - (mean(t_values) if t_values else 0.0)) * 0.36
+            + min(1.0, late_retrievals / max(1, len(rallies) * 3)) * 0.34
+            + (mean(coverage_values) if coverage_values else 0.0) * 0.3,
+        )
+
+        profiles[label] = {
+            "rallies_won": len(won),
+            "rallies_lost": len(lost),
+            "winner_rate": round(_rate(len(won), len(won) + len(lost)), 4),
+            "avg_shots_in_wins": round(mean(len(rally.shots) for rally in won), 4) if won else 0.0,
+            "avg_shots_in_losses": round(mean(len(rally.shots) for rally in lost), 4) if lost else 0.0,
+            "shot_mix": _shot_mix(player_shots, "type"),
+            "side_mix": _shot_mix(player_shots, "side"),
+            "avg_t_occupancy": round(mean(t_values), 4) if t_values else 0.0,
+            "avg_court_coverage": round(mean(coverage_values), 4) if coverage_values else 0.0,
+            "avg_speed": round(mean(avg_speed_values), 4) if avg_speed_values else 0.0,
+            "late_retrievals": late_retrievals,
+            "pressure_index": round(float(pressure_index), 4),
+        }
+    return profiles
+
+
+def _sequence_patterns(rallies: list[RallySummary], window: int = 3) -> list[dict[str, object]]:
+    sequence_counts: Counter[tuple[str, ...]] = Counter()
+    player_counts: dict[tuple[str, ...], Counter[str]] = defaultdict(Counter)
+    outcome_counts: dict[tuple[str, ...], Counter[str]] = defaultdict(Counter)
+
+    for rally in rallies:
+        shot_types = [shot.type for shot in rally.shots if shot.type and shot.type != "unknown"]
+        if len(shot_types) < 2:
+            continue
+        max_window = min(window, len(shot_types))
+        for size in range(2, max_window + 1):
+            for idx in range(0, len(shot_types) - size + 1):
+                sequence = tuple(shot_types[idx : idx + size])
+                sequence_counts[sequence] += 1
+                player = rally.shots[min(idx + size - 1, len(rally.shots) - 1)].player.value
+                player_counts[sequence][player] += 1
+                outcome_counts[sequence][str(rally.outcome or "unknown")] += 1
+
+    total_rallies = max(1, len(rallies))
+    patterns = []
+    for sequence, count in sequence_counts.most_common(8):
+        if count < 2:
+            continue
+        patterns.append(
+            {
+                "sequence": " -> ".join(sequence),
+                "count": count,
+                "rally_rate": round(count / total_rallies, 4),
+                "players": dict(sorted(player_counts[sequence].items())),
+                "outcomes": dict(outcome_counts[sequence].most_common(3)),
+            }
+        )
+    return patterns
+
+
+def _risk_flags(profiles: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    flags: list[dict[str, object]] = []
+    for label, profile in profiles.items():
+        pressure_index = float(profile.get("pressure_index", 0.0) or 0.0)
+        if pressure_index >= 0.52:
+            flags.append(
+                {
+                    "player": label,
+                    "severity": "high",
+                    "label": "Movement Pressure",
+                    "detail": "High pressure index from lower T occupancy, court coverage, and late retrieval load.",
+                }
+            )
+        if float(profile.get("winner_rate", 0.0) or 0.0) <= 0.35 and (
+            int(profile.get("rallies_won", 0)) + int(profile.get("rallies_lost", 0))
+        ) >= 3:
+            flags.append(
+                {
+                    "player": label,
+                    "severity": "medium",
+                    "label": "Low Rally Conversion",
+                    "detail": "Outcome proxy shows this player converting fewer than 35% of resolved rallies.",
+                }
+            )
+        side_mix = profile.get("side_mix", {})
+        if isinstance(side_mix, dict) and float(side_mix.get("backhand", 0.0) or 0.0) >= 0.58:
+            flags.append(
+                {
+                    "player": label,
+                    "severity": "medium",
+                    "label": "Backhand Load",
+                    "detail": "Shot proxy shows a heavy share of backhand-side contacts.",
+                }
+            )
+    return flags
+
+
+def _review_pack(rallies: list[RallySummary], duration_sec: float) -> dict[str, object]:
+    scored: dict[int, dict[str, object]] = {}
+    if not rallies:
+        return {"version": "review-pack-v1", "clip_pad_sec": 1.5, "highlights": [], "multimodal_prompt": ""}
+
+    max_duration = max(1.0, max(rally.duration_sec for rally in rallies))
+    max_shots = max(1, max(len(rally.shots) for rally in rallies))
+
+    for rally in rallies:
+        pressure = rally.metadata.get("pressure", {}) if rally.metadata else {}
+        intensity = float(pressure.get("intensity_score", 0.0) or 0.0) if isinstance(pressure, dict) else 0.0
+        score = (
+            min(1.0, rally.duration_sec / max_duration) * 0.32
+            + min(1.0, len(rally.shots) / max_shots) * 0.26
+            + intensity * 0.3
+            + (0.12 if "winner" in rally.outcome else 0.0)
+        )
+        reasons = []
+        if rally.duration_sec == max_duration:
+            reasons.append("Longest rally")
+        if len(rally.shots) == max_shots:
+            reasons.append("Most classified shots")
+        if intensity >= 0.6:
+            reasons.append("High pressure/intensity")
+        if "winner" in rally.outcome:
+            reasons.append("Terminal winner")
+        if not reasons:
+            reasons.append("Representative tactical sample")
+
+        scored[rally.rally_id] = {
+            "rally_id": rally.rally_id,
+            "score": round(float(score), 4),
+            "reasons": reasons,
+            "start_sec": round(float(rally.start_time), 3),
+            "end_sec": round(float(rally.end_time), 3),
+            "clip_start_sec": round(max(0.0, float(rally.start_time) - 1.5), 3),
+            "clip_end_sec": round(min(duration_sec or rally.end_time, float(rally.end_time) + 1.5), 3),
+            "focus": _review_focus(rally),
+        }
+
+    highlights = sorted(scored.values(), key=lambda item: item["score"], reverse=True)[:8]
+    for idx, item in enumerate(highlights, start=1):
+        item["rank"] = idx
+
+    prompt_lines = [
+        "You are a high-level squash coach reviewing selected rally clips plus structured CV data.",
+        "For each highlighted rally, verify the CV event sequence, identify the cause of advantage/loss, and give one concrete correction.",
+        "Pay special attention to T recovery, backhand pressure, short-ball decisions, and fatigue signals.",
+        "Highlighted rallies:",
+    ]
+    for item in highlights:
+        prompt_lines.append(
+            f"- Rally {item['rally_id']} ({item['clip_start_sec']}s-{item['clip_end_sec']}s): {item['focus']}"
+        )
+
+    return {
+        "version": "review-pack-v1",
+        "clip_pad_sec": 1.5,
+        "highlights": highlights,
+        "multimodal_prompt": "\n".join(prompt_lines),
+    }
+
+
+def _review_focus(rally: RallySummary) -> str:
+    pressure = rally.metadata.get("pressure", {}) if rally.metadata else {}
+    flags = pressure.get("flags", []) if isinstance(pressure, dict) else []
+    labels = [
+        str(flag.get("label"))
+        for flag in flags
+        if isinstance(flag, dict) and flag.get("label")
+    ]
+    if labels:
+        return f"{rally.outcome}; review {', '.join(labels[:3]).lower()}."
+    return f"{rally.outcome}; review shot selection and recovery shape."
+
+
+def _match_intelligence(rallies: list[RallySummary], duration_sec: float) -> dict[str, object]:
+    profiles = _player_profiles(rallies)
+    outcome_counts: Counter[str] = Counter()
+    winner_counts: Counter[str] = Counter()
+    for rally in rallies:
+        model = rally.metadata.get("outcome_model", {}) if rally.metadata else {}
+        if isinstance(model, dict):
+            outcome_counts[str(model.get("category") or "unknown")] += 1
+            winner = model.get("winner")
+            if winner in {"A", "B"}:
+                winner_counts[str(winner)] += 1
+            else:
+                winner_counts["unknown"] += 1
+
+    return {
+        "version": "match-intelligence-v1",
+        "outcome_summary": {
+            "A_wins": winner_counts.get("A", 0),
+            "B_wins": winner_counts.get("B", 0),
+            "unknown": winner_counts.get("unknown", 0),
+            "categories": dict(sorted(outcome_counts.items())),
+        },
+        "player_profiles": profiles,
+        "phase_splits": _phase_summary(rallies),
+        "sequence_patterns": _sequence_patterns(rallies),
+        "risk_flags": _risk_flags(profiles),
+        "review_pack": _review_pack(rallies, duration_sec),
+    }
 
 
 def aggregate_match(
@@ -479,6 +877,9 @@ def aggregate_match(
         "CV output is heuristic; use for trend spotting before coach-level review.",
         "For production use, replace the ball tracker with a squash-specific detector.",
     ]
+    inferred_duration = (frame_count / fps) if fps > 0 else 0.0
+    duration_sec = max(inferred_duration, max((r.end_time for r in rallies), default=0.0))
+    intelligence = _match_intelligence(rallies, duration_sec=duration_sec)
 
     return MatchTimeline(
         video_path=video_path,
@@ -487,5 +888,9 @@ def aggregate_match(
         rallies=rallies,
         tactical_patterns={k: round(v, 4) for k, v in tactical.items()},
         movement_summary={k: round(v, 4) for k, v in movement.items()},
+        diagnostics={
+            "match_intelligence": intelligence,
+            "review_pack": intelligence["review_pack"],
+        },
         notes=notes,
     )
