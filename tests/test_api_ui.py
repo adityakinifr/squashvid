@@ -29,3 +29,16 @@ def test_analysis_duration_defaults_to_full_video() -> None:
 
     assert request.max_video_minutes is None
     assert options.max_video_minutes is None
+
+
+def test_analyze_request_accepts_manual_segments() -> None:
+    request = AnalyzeRequest(
+        video_path="/tmp/demo.mp4",
+        manual_segments=[
+            {"rally_id": 1, "start_sec": 0.4, "end_sec": 34.0, "corrected": True}
+        ],
+    )
+
+    assert request.manual_segments is not None
+    assert request.manual_segments[0].start_sec == 0.4
+    assert request.manual_segments[0].corrected is True

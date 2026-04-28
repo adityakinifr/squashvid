@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import squashvid.pipeline.orchestrator as orchestrator
 from squashvid.pipeline.models import FrameObservation, Segment, SegmentTrack
+from squashvid.schemas import AnalyzeOptions, ManualRallySegment, RallySummary
 
 
 def test_resolve_cv_workers_auto_and_bounds() -> None:
@@ -48,3 +49,65 @@ def test_build_rallies_falls_back_to_sequential_when_process_pool_blocked(monkey
     )
     assert workers == 1
     assert len(rallies) == 2
+
+
+def test_analyze_video_execution_uses_manual_segments(monkeypatch) -> None:
+    class _PreparedSource:
+        local_path = "/tmp/fake.mp4"
+        downloaded = False
+        title = None
+
+    captured: dict[str, list[Segment]] = {}
+
+    def _fail_auto_segmentation(*args, **kwargs):
+        raise AssertionError("automatic segmentation should not run")
+
+    def _fake_build_rallies(
+        local_video_path: str,
+        segments: list[Segment],
+        tracking_frame_step: int,
+        cv_workers: int | None,
+    ):
+        captured["segments"] = segments
+        rallies = [
+            RallySummary(
+                rally_id=idx,
+                start_time=segment.start_sec,
+                end_time=segment.end_sec,
+                duration_sec=segment.duration_sec,
+                outcome="unknown",
+            )
+            for idx, segment in enumerate(segments, start=1)
+        ]
+        return rallies, 1
+
+    monkeypatch.setattr(orchestrator, "prepare_video_source", lambda *args, **kwargs: _PreparedSource())
+    monkeypatch.setattr(
+        orchestrator,
+        "read_video_metadata",
+        lambda _: {"fps": 30.0, "frame_count": 3000, "duration_sec": 100.0},
+    )
+    monkeypatch.setattr(orchestrator, "detect_active_segments_with_diagnostics", _fail_auto_segmentation)
+    monkeypatch.setattr(orchestrator, "_build_rallies", _fake_build_rallies)
+
+    execution = orchestrator.analyze_video_execution(
+        "/tmp/fake.mp4",
+        AnalyzeOptions(
+            include_llm=False,
+            manual_segments=[
+                ManualRallySegment(
+                    rally_id=1,
+                    start_sec=0.4,
+                    end_sec=34.0,
+                    corrected=True,
+                )
+            ],
+        ),
+    )
+
+    assert captured["segments"][0].start_sec == 0.4
+    assert captured["segments"][0].end_sec == 34.0
+    diagnostics = execution.result.timeline.diagnostics["segmentation"]
+    assert diagnostics["mode"] == "manual"
+    assert diagnostics["manual_override_used"] is True
+    assert diagnostics["corrected_segment_count"] == 1

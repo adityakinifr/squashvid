@@ -105,14 +105,16 @@ UI includes a **Rally Review Scrubber**:
 - video view is cropped to the inferred rally focus area
 - shot markers appear on the scrubber timeline and are clickable
 - selected rally panel shows full shot-by-shot details
-- preview controls let you adjust selected rally start/end bounds locally for review
+- preview controls let you adjust selected rally start/end bounds locally
+- saved boundary corrections can be re-run so shots, metrics, and coaching output are recomputed
+- correction controls support merging the next rally, deleting false rally windows, and adding a missing rally window
 - rally grid supports sorting by match order, longest, shortest, or most shots
 - rally picker lets you jump directly to a specific rally number
 - filters include winner, rally-length range, and shot-count range
 - player names are configurable (A/B labels become custom names across UI + insights)
 - coaching insights are rendered as visual cards for patterns, drills, and full written report sections
 - advanced controls include CV worker-process count, start minute, and optional duration
-- segmentation diagnostics show analyzed window, threshold choice, candidate segments, and fallback usage
+- segmentation diagnostics show analyzed window, threshold choice, signal source, bridge behavior, motion preview, candidate segments, and fallback usage
 
 Analyze by file path:
 
@@ -143,6 +145,11 @@ curl -X POST http://localhost:8000/analyze/path \
 curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
   -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"analysis_start_minute":4,"max_video_minutes":8}'
+
+# with manual rally boundaries, bypassing automatic segmentation
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"manual_segments":[{"rally_id":1,"start_sec":0.4,"end_sec":34.0,"corrected":true}]}'
 
 # with per-request API key override
 curl -X POST http://localhost:8000/analyze/path \

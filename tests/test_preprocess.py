@@ -159,3 +159,34 @@ def test_merge_close_segments_and_tail_extension() -> None:
     assert round(padded[0].end_sec, 2) == 34.0
     # Extension must not cross into next segment.
     assert padded[0].end_sec <= padded[1].start_sec
+
+
+def test_bridge_fragmented_segments_merges_short_rally_splits() -> None:
+    fragments = [
+        preprocess.Segment(start_sec=8.0, end_sec=12.2),
+        preprocess.Segment(start_sec=15.6, end_sec=22.2),
+        preprocess.Segment(start_sec=24.6, end_sec=31.0),
+        preprocess.Segment(start_sec=49.0, end_sec=63.0),
+    ]
+
+    bridged = preprocess._bridge_fragmented_segments(
+        fragments,
+        bridge_gap_sec=4.0,
+        fragment_sec=12.0,
+        max_merged_sec=60.0,
+    )
+
+    assert len(bridged) == 2
+    assert bridged[0].start_sec == 8.0
+    assert bridged[0].end_sec == 31.0
+    assert bridged[1].start_sec == 49.0
+
+
+def test_motion_preview_payload_is_downsampled() -> None:
+    samples = [(float(i), 0.02 if i % 2 == 0 else 0.001) for i in range(500)]
+
+    preview = preprocess._motion_preview_payload(samples, threshold=0.018, limit=50)
+
+    assert len(preview) <= 50
+    assert preview[0]["timestamp_sec"] == 0.0
+    assert preview[0]["active"] == 1.0

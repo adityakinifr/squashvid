@@ -11,12 +11,19 @@ from squashvid.pipeline.llm import generate_coaching_insight
 from squashvid.pipeline.models import Segment
 from squashvid.pipeline.preprocess import (
     SEGMENTER_VERSION,
+    SegmentationResult,
     detect_active_segments_with_diagnostics,
     read_video_metadata,
 )
 from squashvid.pipeline.video_source import prepare_video_source
 from squashvid.pipeline.vision import track_segment
-from squashvid.schemas import AnalysisResult, AnalyzeOptions, CoachingInsight, RallySummary
+from squashvid.schemas import (
+    AnalysisResult,
+    AnalyzeOptions,
+    CoachingInsight,
+    ManualRallySegment,
+    RallySummary,
+)
 
 
 @dataclass(slots=True)
@@ -25,6 +32,63 @@ class AnalysisExecution:
     local_video_path: str
     source_downloaded: bool
     source_title: str | None = None
+
+
+def _segments_payload(segments: list[Segment]) -> list[dict[str, float]]:
+    return [
+        {
+            "start_sec": round(float(seg.start_sec), 3),
+            "end_sec": round(float(seg.end_sec), 3),
+            "duration_sec": round(float(seg.duration_sec), 3),
+        }
+        for seg in segments
+    ]
+
+
+def _manual_segmentation_result(
+    manual_segments: list[ManualRallySegment],
+    source_duration_sec: float,
+) -> SegmentationResult:
+    segments: list[Segment] = []
+    corrected_count = 0
+
+    for idx, manual in enumerate(manual_segments, start=1):
+        start = float(manual.start_sec)
+        end = float(manual.end_sec)
+        if end <= start:
+            label = manual.rally_id if manual.rally_id is not None else idx
+            raise ValueError(f"Manual rally segment {label} must end after it starts.")
+
+        if source_duration_sec > 0.0:
+            if start >= source_duration_sec:
+                label = manual.rally_id if manual.rally_id is not None else idx
+                raise ValueError(f"Manual rally segment {label} starts after the video ends.")
+            end = min(end, source_duration_sec)
+            if end <= start:
+                label = manual.rally_id if manual.rally_id is not None else idx
+                raise ValueError(f"Manual rally segment {label} is outside the video duration.")
+
+        if manual.corrected:
+            corrected_count += 1
+        segments.append(Segment(start_sec=start, end_sec=end))
+
+    segments.sort(key=lambda seg: (seg.start_sec, seg.end_sec))
+    window_start = segments[0].start_sec if segments else 0.0
+    window_end = segments[-1].end_sec if segments else 0.0
+    diagnostics = {
+        "version": f"{SEGMENTER_VERSION}-manual-overrides",
+        "mode": "manual",
+        "manual_override_used": True,
+        "manual_segment_count": len(segments),
+        "corrected_segment_count": corrected_count,
+        "source_duration_sec": round(float(source_duration_sec), 3),
+        "window_start_sec": round(float(window_start), 3),
+        "window_end_sec": round(float(window_end), 3),
+        "window_duration_sec": round(float(max(0.0, window_end - window_start)), 3),
+        "final_segment_count": len(segments),
+        "final_segments": _segments_payload(segments),
+    }
+    return SegmentationResult(segments=segments, diagnostics=diagnostics)
 
 
 def _resolve_cv_workers(requested_workers: int | None, segment_count: int) -> int:
@@ -152,16 +216,22 @@ def analyze_video_execution(
         if opts.max_video_minutes is not None
         else None
     )
-    segmentation = detect_active_segments_with_diagnostics(
-        video_path=local_video_path,
-        motion_threshold=opts.motion_threshold,
-        min_rally_sec=opts.min_rally_sec,
-        idle_gap_sec=opts.idle_gap_sec,
-        frame_step=opts.segment_frame_step,
-        max_rallies=opts.max_rallies,
-        max_duration_sec=max_duration_sec,
-        start_offset_sec=start_offset_sec,
-    )
+    if opts.manual_segments:
+        segmentation = _manual_segmentation_result(
+            manual_segments=opts.manual_segments,
+            source_duration_sec=float(meta.get("duration_sec", 0.0) or 0.0),
+        )
+    else:
+        segmentation = detect_active_segments_with_diagnostics(
+            video_path=local_video_path,
+            motion_threshold=opts.motion_threshold,
+            min_rally_sec=opts.min_rally_sec,
+            idle_gap_sec=opts.idle_gap_sec,
+            frame_step=opts.segment_frame_step,
+            max_rallies=opts.max_rallies,
+            max_duration_sec=max_duration_sec,
+            start_offset_sec=start_offset_sec,
+        )
     segments = segmentation.segments
 
     rallies, worker_count = _build_rallies(
@@ -230,6 +300,11 @@ def analyze_video_execution(
     if segmentation.diagnostics.get("fallback_full_window_used"):
         timeline.notes.append(
             "No confident rally breaks were detected, so the analyzed window was kept as one fallback segment."
+        )
+    if segmentation.diagnostics.get("manual_override_used"):
+        timeline.notes.append(
+            f"Manual rally boundaries were used for {segmentation.diagnostics.get('manual_segment_count', 0)} segments "
+            f"({segmentation.diagnostics.get('corrected_segment_count', 0)} corrected)."
         )
     timeline.notes.append(f"Player label mapping: A={player_a}, B={player_b}.")
 

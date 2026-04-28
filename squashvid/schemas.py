@@ -67,6 +67,13 @@ class AnalysisResult(BaseModel):
     source_video_url: str | None = None
 
 
+class ManualRallySegment(BaseModel):
+    rally_id: int | None = Field(default=None, ge=1)
+    start_sec: float = Field(..., ge=0.0)
+    end_sec: float = Field(..., gt=0.0)
+    corrected: bool = False
+
+
 class AnalyzeRequest(BaseModel):
     video_path: str
     include_llm: bool = True
@@ -83,6 +90,7 @@ class AnalyzeRequest(BaseModel):
     cv_workers: int | None = Field(default=None, ge=1, le=128)
     analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
+    manual_segments: list[ManualRallySegment] | None = None
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False
@@ -103,6 +111,7 @@ class AnalyzeOptions(BaseModel):
     cv_workers: int | None = Field(default=None, ge=1, le=128)
     analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
+    manual_segments: list[ManualRallySegment] | None = None
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False

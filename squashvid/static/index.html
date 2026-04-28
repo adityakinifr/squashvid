@@ -255,9 +255,18 @@
                 <label for="boundary-end">Preview End (s)</label>
                 <input id="boundary-end" type="number" min="0" step="0.1" />
               </div>
-              <button id="boundary-apply" type="button" class="secondary">Preview Bounds</button>
-              <button id="boundary-reset" type="button" class="secondary">Reset</button>
-              <p id="boundary-note">Preview only. Shot detection is not recomputed until we add saved boundary corrections.</p>
+              <div class="boundary-actions">
+                <button id="boundary-apply" type="button" class="secondary">Preview</button>
+                <button id="boundary-save" type="button" class="secondary">Save Bounds</button>
+                <button id="boundary-merge-next" type="button" class="secondary">Merge Next</button>
+                <button id="boundary-delete" type="button" class="secondary">Delete Rally</button>
+                <button id="boundary-add" type="button" class="secondary">Add Window</button>
+                <button id="boundary-rerun" type="button" class="secondary">Re-run Saved</button>
+                <button id="boundary-reset" type="button" class="secondary">Reset Preview</button>
+                <button id="boundary-clear" type="button" class="secondary">Clear Active</button>
+                <button id="boundary-clear-all" type="button" class="secondary">Clear All</button>
+              </div>
+              <p id="boundary-note">Save, merge, delete, or add rally windows, then re-run to recompute shots and coaching output.</p>
             </div>
             <div class="review-stage">
               <canvas id="review-canvas" width="960" height="540"></canvas>

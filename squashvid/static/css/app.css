@@ -302,6 +302,12 @@ body {
   transform: translateY(-1px);
 }
 
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 #status-text {
   margin: 0;
   color: var(--muted);
@@ -481,6 +487,33 @@ body {
   gap: 0.42rem;
 }
 
+.motion-preview-card {
+  flex: 1 0 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.58rem;
+  background: linear-gradient(160deg, #fff, rgba(15, 111, 157, 0.055));
+}
+
+.motion-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #244a5a;
+  font-size: 0.82rem;
+}
+
+.motion-preview-head span {
+  color: var(--muted);
+}
+
+.motion-preview-card svg {
+  display: block;
+  width: 100%;
+  height: 132px;
+  margin-top: 0.3rem;
+}
+
 .segment-chip {
   border: 1px dashed rgba(12, 24, 30, 0.25);
   border-radius: 999px;
@@ -567,7 +600,7 @@ body {
 
 .boundary-editor {
   display: grid;
-  grid-template-columns: minmax(110px, 0.8fr) minmax(110px, 0.8fr) auto auto minmax(180px, 1.4fr);
+  grid-template-columns: minmax(110px, 0.7fr) minmax(110px, 0.7fr) minmax(280px, 1.4fr) minmax(180px, 1fr);
   gap: 0.55rem;
   align-items: end;
   border: 1px dashed rgba(12, 24, 30, 0.18);
@@ -590,11 +623,67 @@ body {
   color: var(--text);
 }
 
+.boundary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.boundary-actions .secondary {
+  min-height: 2.25rem;
+  padding-inline: 0.72rem;
+}
+
 #boundary-note {
   margin: 0;
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.35;
+}
+
+.rally-card.corrected {
+  border-color: rgba(249, 110, 42, 0.5);
+  box-shadow: 0 10px 24px rgba(249, 110, 42, 0.12);
+}
+
+.rally-card.deleted {
+  opacity: 0.58;
+  border-color: rgba(120, 42, 42, 0.38);
+  background:
+    repeating-linear-gradient(
+      -35deg,
+      rgba(120, 42, 42, 0.035),
+      rgba(120, 42, 42, 0.035) 8px,
+      rgba(255, 255, 255, 0.35) 8px,
+      rgba(255, 255, 255, 0.35) 16px
+    ),
+    linear-gradient(160deg, #fff, rgba(120, 42, 42, 0.04));
+}
+
+.rally-card.corrected::after,
+.rally-card.deleted::after {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.62rem;
+  border: 1px solid rgba(249, 110, 42, 0.42);
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  background: rgba(255, 255, 255, 0.82);
+  color: #914419;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rally-card.corrected::after {
+  content: "saved";
+}
+
+.rally-card.deleted::after {
+  content: "delete";
+  border-color: rgba(120, 42, 42, 0.35);
+  color: #713030;
 }
 
 .rally-list {

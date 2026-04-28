@@ -9,7 +9,7 @@ import numpy as np
 
 from squashvid.pipeline.models import Segment
 
-SEGMENTER_VERSION = "adaptive-v4-diagnostics-window"
+SEGMENTER_VERSION = "adaptive-v5-smoothed-bridged"
 
 
 @dataclass(slots=True)
@@ -108,6 +108,30 @@ def _merge_close_segments(
             merged.append(seg)
 
     return merged[:max_rallies] if max_rallies is not None else merged
+
+
+def _bridge_fragmented_segments(
+    segments: list[Segment],
+    bridge_gap_sec: float,
+    fragment_sec: float = 14.0,
+    max_merged_sec: float = 75.0,
+) -> list[Segment]:
+    if not segments:
+        return []
+    if bridge_gap_sec <= 0:
+        return segments
+
+    bridged: list[Segment] = [segments[0]]
+    for seg in segments[1:]:
+        prev = bridged[-1]
+        gap = seg.start_sec - prev.end_sec
+        merged_duration = seg.end_sec - prev.start_sec
+        is_likely_fragment = prev.duration_sec <= fragment_sec or seg.duration_sec <= fragment_sec
+        if gap <= bridge_gap_sec and is_likely_fragment and merged_duration <= max_merged_sec:
+            bridged[-1] = Segment(start_sec=prev.start_sec, end_sec=max(prev.end_sec, seg.end_sec))
+        else:
+            bridged.append(seg)
+    return bridged
 
 
 def _extend_segment_tails(
@@ -255,15 +279,92 @@ def _select_adaptive_threshold(
     return None
 
 
-def _segments_diagnostic_payload(segments: list[Segment], limit: int = 80) -> list[dict[str, float]]:
-    return [
-        {
+def _segment_confidence(
+    segment: Segment,
+    motion_samples: list[tuple[float, float]],
+    threshold: float,
+) -> tuple[float | None, float | None]:
+    samples = [
+        ratio
+        for ts, ratio in motion_samples
+        if segment.start_sec <= ts <= segment.end_sec
+    ]
+    if not samples:
+        return None, None
+
+    ratios = np.array(samples, dtype=float)
+    active_rate = float(np.count_nonzero(ratios >= threshold) / ratios.size)
+    threshold_strength = float(min(1.0, ratios.mean() / max(threshold * 1.75, 0.0001)))
+    duration_strength = float(min(1.0, segment.duration_sec / 18.0))
+    confidence = 0.5 * active_rate + 0.32 * threshold_strength + 0.18 * duration_strength
+    return round(float(confidence), 3), round(float(active_rate), 3)
+
+
+def _segments_diagnostic_payload(
+    segments: list[Segment],
+    limit: int = 80,
+    motion_samples: list[tuple[float, float]] | None = None,
+    threshold: float | None = None,
+) -> list[dict[str, float]]:
+    payload: list[dict[str, float]] = []
+    for seg in segments[:limit]:
+        row = {
             "start_sec": round(float(seg.start_sec), 3),
             "end_sec": round(float(seg.end_sec), 3),
             "duration_sec": round(float(seg.duration_sec), 3),
         }
-        for seg in segments[:limit]
-    ]
+        if motion_samples is not None and threshold is not None:
+            confidence, active_rate = _segment_confidence(seg, motion_samples, threshold)
+            if confidence is not None:
+                row["confidence"] = confidence
+            if active_rate is not None:
+                row["active_sample_rate"] = active_rate
+        payload.append(row)
+    return payload
+
+
+def _smooth_motion_samples(
+    motion_samples: list[tuple[float, float]],
+    window_sec: float,
+) -> list[tuple[float, float]]:
+    if len(motion_samples) < 4 or window_sec <= 0:
+        return motion_samples
+
+    timestamps = np.array([sample[0] for sample in motion_samples], dtype=float)
+    ratios = np.array([sample[1] for sample in motion_samples], dtype=float)
+    deltas = np.diff(timestamps)
+    positive_deltas = deltas[deltas > 0]
+    if positive_deltas.size == 0:
+        return motion_samples
+
+    sample_step = float(np.median(positive_deltas))
+    window_size = max(3, int(round(window_sec / max(sample_step, 0.001))))
+    if window_size % 2 == 0:
+        window_size += 1
+    kernel = np.ones(window_size, dtype=float) / window_size
+    smoothed = np.convolve(ratios, kernel, mode="same")
+    return [(float(ts), float(ratio)) for ts, ratio in zip(timestamps, smoothed)]
+
+
+def _motion_preview_payload(
+    motion_samples: list[tuple[float, float]],
+    threshold: float,
+    limit: int = 220,
+) -> list[dict[str, float]]:
+    if not motion_samples:
+        return []
+
+    stride = max(1, int(np.ceil(len(motion_samples) / limit)))
+    preview = []
+    for timestamp, ratio in motion_samples[::stride][:limit]:
+        preview.append(
+            {
+                "timestamp_sec": round(float(timestamp), 3),
+                "motion": round(float(ratio), 6),
+                "active": 1.0 if ratio >= threshold else 0.0,
+            }
+        )
+    return preview
 
 
 def _motion_diagnostic_payload(
@@ -375,6 +476,13 @@ def detect_active_segments_with_diagnostics(
     total_duration = max(start_offset_sec, total_duration)
     analysis_duration = max(0.0, total_duration - start_offset_sec)
 
+    smoothing_window_sec = max(0.6, min(1.2, idle_gap_sec * 0.7))
+    smoothed_motion_samples = _smooth_motion_samples(
+        motion_samples=motion_samples,
+        window_sec=smoothing_window_sec,
+    )
+    smoothed_threshold = max(0.0015, motion_threshold * 0.82)
+
     base_segments = _segments_from_motion_samples(
         motion_samples=motion_samples,
         threshold=motion_threshold,
@@ -383,10 +491,33 @@ def detect_active_segments_with_diagnostics(
         total_duration=total_duration,
         max_rallies=None,
     )
+    smoothed_segments = _segments_from_motion_samples(
+        motion_samples=smoothed_motion_samples,
+        threshold=smoothed_threshold,
+        min_rally_sec=min_rally_sec,
+        idle_gap_sec=max(idle_gap_sec, smoothing_window_sec),
+        total_duration=total_duration,
+        max_rallies=None,
+    )
     segments = base_segments
     selected_threshold = motion_threshold
+    segment_signal = "raw"
     adaptive_threshold: float | None = None
     adaptive_used = False
+
+    if smoothed_segments:
+        base_fragments = sum(1 for seg in base_segments if seg.duration_sec <= min_rally_sec * 2.8)
+        smoothed_fragments = sum(
+            1 for seg in smoothed_segments if seg.duration_sec <= min_rally_sec * 2.8
+        )
+        if (
+            not base_segments
+            or (len(base_segments) > 3 and len(smoothed_segments) < len(base_segments))
+            or (smoothed_fragments < base_fragments and len(smoothed_segments) <= len(base_segments))
+        ):
+            segments = smoothed_segments
+            selected_threshold = smoothed_threshold
+            segment_signal = "smoothed"
 
     needs_adaptive = False
     if not segments:
@@ -426,6 +557,7 @@ def detect_active_segments_with_diagnostics(
             if len(adaptive_segments) >= 2:
                 segments = adaptive_segments
                 selected_threshold = adaptive_threshold
+                segment_signal = "adaptive"
                 adaptive_used = True
 
     merge_gap_sec = min(2.4, max(idle_gap_sec * 1.5, idle_gap_sec + 0.5))
@@ -436,12 +568,29 @@ def detect_active_segments_with_diagnostics(
         max_rallies=None,
     )
     merged_segments = segments
+    bridge_gap_sec = min(5.0, max(idle_gap_sec * 3.0, idle_gap_sec + 2.4))
+    pre_bridge_segments = segments
+    segments = _bridge_fragmented_segments(
+        segments=segments,
+        bridge_gap_sec=bridge_gap_sec,
+        fragment_sec=max(12.0, min_rally_sec * 3.5),
+        max_merged_sec=max(45.0, min(90.0, analysis_duration * 0.55 if analysis_duration else 75.0)),
+    )
+    bridged_segments = segments
     segments = _extend_segment_tails(
         segments=segments,
         tail_pad_sec=min(1.4, idle_gap_sec + 0.2),
         total_duration=total_duration,
         max_rallies=None,
     )
+
+    leading_context_sec = max(8.0, min(14.0, min_rally_sec * 2.8))
+    leading_extension_used = False
+    if segments and start_offset_sec < segments[0].start_sec:
+        leading_gap_sec = segments[0].start_sec - start_offset_sec
+        if leading_gap_sec <= leading_context_sec:
+            segments[0] = Segment(start_sec=start_offset_sec, end_sec=segments[0].end_sec)
+            leading_extension_used = True
 
     min_full_segment_sec = min(min_rally_sec, 1.0)
     fallback_used = False
@@ -463,22 +612,58 @@ def detect_active_segments_with_diagnostics(
         "requested_max_rallies": int(max_rallies) if max_rallies is not None else None,
         "base_threshold": round(float(motion_threshold), 6),
         "selected_threshold": round(float(selected_threshold), 6),
+        "smoothed_threshold": round(float(smoothed_threshold), 6),
+        "segment_signal": segment_signal,
+        "smoothing_window_sec": round(float(smoothing_window_sec), 3),
         "adaptive_threshold": round(float(adaptive_threshold), 6)
         if adaptive_threshold is not None
         else None,
         "adaptive_used": adaptive_used,
         "fallback_full_window_used": fallback_used,
         "merge_gap_sec": round(float(merge_gap_sec), 3),
+        "bridge_gap_sec": round(float(bridge_gap_sec), 3),
         "tail_pad_sec": round(float(min(1.4, idle_gap_sec + 0.2)), 3),
+        "leading_context_sec": round(float(leading_context_sec), 3),
+        "leading_extension_used": leading_extension_used,
         "base_segment_count": len(base_segments),
+        "smoothed_segment_count": len(smoothed_segments),
         "pre_merge_segment_count": len(pre_merge_segments),
         "merged_segment_count": len(merged_segments),
+        "pre_bridge_segment_count": len(pre_bridge_segments),
+        "bridged_segment_count": len(bridged_segments),
         "final_segment_count": len(final_segments),
         "motion": _motion_diagnostic_payload(motion_samples, selected_threshold),
-        "base_segments": _segments_diagnostic_payload(base_segments),
-        "pre_merge_segments": _segments_diagnostic_payload(pre_merge_segments),
-        "merged_segments": _segments_diagnostic_payload(merged_segments),
-        "final_segments": _segments_diagnostic_payload(final_segments),
+        "motion_preview": _motion_preview_payload(motion_samples, selected_threshold),
+        "base_segments": _segments_diagnostic_payload(
+            base_segments,
+            motion_samples=motion_samples,
+            threshold=motion_threshold,
+        ),
+        "smoothed_segments": _segments_diagnostic_payload(
+            smoothed_segments,
+            motion_samples=smoothed_motion_samples,
+            threshold=smoothed_threshold,
+        ),
+        "pre_merge_segments": _segments_diagnostic_payload(
+            pre_merge_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
+        "merged_segments": _segments_diagnostic_payload(
+            merged_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
+        "bridged_segments": _segments_diagnostic_payload(
+            bridged_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
+        "final_segments": _segments_diagnostic_payload(
+            final_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
     }
     return SegmentationResult(segments=final_segments, diagnostics=diagnostics)
 

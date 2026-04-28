@@ -40,7 +40,14 @@ const selectedRallyShots = document.getElementById("selected-rally-shots");
 const boundaryStartInput = document.getElementById("boundary-start");
 const boundaryEndInput = document.getElementById("boundary-end");
 const boundaryApplyBtn = document.getElementById("boundary-apply");
+const boundarySaveBtn = document.getElementById("boundary-save");
+const boundaryMergeNextBtn = document.getElementById("boundary-merge-next");
+const boundaryDeleteBtn = document.getElementById("boundary-delete");
+const boundaryAddBtn = document.getElementById("boundary-add");
+const boundaryRerunBtn = document.getElementById("boundary-rerun");
 const boundaryResetBtn = document.getElementById("boundary-reset");
+const boundaryClearBtn = document.getElementById("boundary-clear");
+const boundaryClearAllBtn = document.getElementById("boundary-clear-all");
 const boundaryNote = document.getElementById("boundary-note");
 
 const insightPanel = document.getElementById("insight-panel");
@@ -67,6 +74,10 @@ let allRallies = [];
 let displayedRallies = [];
 let playerNames = { A: "Player A", B: "Player B" };
 let selectedOriginalBounds = null;
+let savedBoundaryCorrections = new Map();
+let deletedRallyIds = new Set();
+let addedManualSegments = [];
+let manualAddedSeq = 1;
 
 function activeMode() {
   const checked = modeRadios.find((radio) => radio.checked);
@@ -209,6 +220,111 @@ function cloneRallyForReview(rally) {
     positions: rally.positions ? { ...rally.positions } : {},
     metadata: rally.metadata ? { ...rally.metadata } : {},
   };
+}
+
+function rallyCorrectionKey(rallyOrId) {
+  if (rallyOrId && typeof rallyOrId === "object") {
+    return String(rallyOrId.rally_id || "");
+  }
+  return String(rallyOrId || "");
+}
+
+function currentBoundaryInputValues() {
+  const start = parsePositiveNumber(boundaryStartInput?.value, null);
+  const end = parsePositiveNumber(boundaryEndInput?.value, null);
+  if (start === null || end === null || end <= start) {
+    return null;
+  }
+  return { start_sec: start, end_sec: end };
+}
+
+function applySavedCorrectionToRally(rally) {
+  const clone = cloneRallyForReview(rally);
+  if (!clone) {
+    return null;
+  }
+  const saved = savedBoundaryCorrections.get(rallyCorrectionKey(clone));
+  if (!saved) {
+    return clone;
+  }
+  clone.start_time = saved.start_sec;
+  clone.end_time = saved.end_sec;
+  clone.duration_sec = saved.end_sec - saved.start_sec;
+  clone.metadata = {
+    ...(clone.metadata || {}),
+    manual_boundary_saved: true,
+  };
+  return clone;
+}
+
+function hasManualTimelineEdits() {
+  return (
+    savedBoundaryCorrections.size > 0 ||
+    deletedRallyIds.size > 0 ||
+    addedManualSegments.length > 0
+  );
+}
+
+function buildManualSegmentsFromRallies() {
+  const segments = [];
+  for (const rally of allRallies) {
+    const key = rallyCorrectionKey(rally);
+    if (deletedRallyIds.has(key)) {
+      continue;
+    }
+    const saved = savedBoundaryCorrections.get(key);
+    const start = saved ? saved.start_sec : Number(rally.start_time || 0);
+    const end = saved ? saved.end_sec : Number(rally.end_time || 0);
+    segments.push({
+      start_sec: start,
+      end_sec: end,
+      corrected: Boolean(saved),
+    });
+  }
+
+  for (const segment of addedManualSegments) {
+    segments.push({
+      start_sec: Number(segment.start_sec || 0),
+      end_sec: Number(segment.end_sec || 0),
+      corrected: true,
+    });
+  }
+
+  return segments
+    .filter(
+      (segment) =>
+        Number.isFinite(segment.start_sec) &&
+        Number.isFinite(segment.end_sec) &&
+        segment.end_sec > segment.start_sec
+    )
+    .sort((a, b) => a.start_sec - b.start_sec)
+    .map((segment, idx) => ({
+      rally_id: idx + 1,
+      start_sec: segment.start_sec,
+      end_sec: segment.end_sec,
+      corrected: Boolean(segment.corrected),
+    }));
+}
+
+function updateSavedBoundaryIndicators() {
+  const hasEdits = hasManualTimelineEdits();
+  if (boundaryRerunBtn) {
+    boundaryRerunBtn.disabled = !hasEdits;
+  }
+  if (boundaryClearBtn) {
+    const activeKey = activeRally ? rallyCorrectionKey(activeRally) : "";
+    boundaryClearBtn.disabled =
+      !activeKey ||
+      (!savedBoundaryCorrections.has(activeKey) && !deletedRallyIds.has(activeKey));
+  }
+  if (boundaryClearAllBtn) {
+    boundaryClearAllBtn.disabled = !hasEdits;
+  }
+  for (const node of rallyList.querySelectorAll(".rally-card")) {
+    const key = node.dataset.rallyId || "";
+    node.classList.toggle("corrected", savedBoundaryCorrections.has(key));
+    node.classList.toggle("deleted", deletedRallyIds.has(key));
+  }
 }
 
 function markdownToHtml(markdown) {
@@ -949,18 +1065,28 @@ function syncBoundaryInputs(rally) {
   boundaryStartInput.value = fmt(rally.start_time, 1);
   boundaryEndInput.value = fmt(rally.end_time, 1);
   if (boundaryNote) {
-    boundaryNote.textContent =
-      "Preview only. Shot detection is not recomputed until saved boundary corrections are added.";
+    const saved = savedBoundaryCorrections.has(rallyCorrectionKey(rally));
+    const deleted = deletedRallyIds.has(rallyCorrectionKey(rally));
+    if (deleted) {
+      boundaryNote.textContent = `Rally ${rally.rally_id} is marked for deletion on re-run.`;
+    } else if (saved) {
+      boundaryNote.textContent = `Saved bounds for Rally ${rally.rally_id}. Re-run saved bounds to recompute shots and coaching.`;
+    } else {
+      boundaryNote.textContent =
+        "Save, merge, delete, or add rally windows, then re-run to recompute shots and coaching output.";
+    }
   }
+  updateSavedBoundaryIndicators();
 }
 
 function selectRally(rally) {
-  activeRally = cloneRallyForReview(rally);
+  const original = cloneRallyForReview(rally);
+  activeRally = applySavedCorrectionToRally(rally);
   selectedOriginalBounds = activeRally
     ? {
-        start_time: Number(activeRally.start_time || 0),
-        end_time: Number(activeRally.end_time || 0),
-        duration_sec: Number(activeRally.duration_sec || 0),
+        start_time: Number(original?.start_time || activeRally.start_time || 0),
+        end_time: Number(original?.end_time || activeRally.end_time || 0),
+        duration_sec: Number(original?.duration_sec || activeRally.duration_sec || 0),
       }
     : null;
   highlightActiveRallyCard();
@@ -982,9 +1108,8 @@ function previewBoundaryBounds() {
   if (!activeRally || !boundaryStartInput || !boundaryEndInput) {
     return;
   }
-  const start = parsePositiveNumber(boundaryStartInput.value, null);
-  const end = parsePositiveNumber(boundaryEndInput.value, null);
-  if (start === null || end === null || end <= start) {
+  const bounds = currentBoundaryInputValues();
+  if (!bounds) {
     if (boundaryNote) {
       boundaryNote.textContent = "Enter a valid end time greater than the start time.";
     }
@@ -993,22 +1118,163 @@ function previewBoundaryBounds() {
 
   activeRally = {
     ...activeRally,
-    start_time: start,
-    end_time: end,
-    duration_sec: end - start,
+    start_time: bounds.start_sec,
+    end_time: bounds.end_sec,
+    duration_sec: bounds.end_sec - bounds.start_sec,
   };
   updateReviewMeta();
   renderShotMarkers(activeRally);
   renderSelectedRallyDetails(activeRally);
   rallyScrubber.value = "0";
   if (reviewVideo.readyState >= 1) {
-    reviewVideo.currentTime = start;
+    reviewVideo.currentTime = bounds.start_sec;
     drawReviewFrame();
   }
   updateShotCaption();
   if (boundaryNote) {
     boundaryNote.textContent =
-      "Previewing adjusted bounds locally. Rally cards and coaching metrics are unchanged.";
+      "Previewing adjusted bounds locally. Save them before re-running analysis.";
+  }
+}
+
+function saveBoundaryBounds() {
+  if (!activeRally) {
+    return;
+  }
+  const bounds = currentBoundaryInputValues();
+  if (!bounds) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "Enter a valid end time greater than the start time.";
+    }
+    return;
+  }
+
+  const key = rallyCorrectionKey(activeRally);
+  deletedRallyIds.delete(key);
+  savedBoundaryCorrections.set(key, {
+    rally_id: Number(activeRally.rally_id || 0),
+    start_sec: bounds.start_sec,
+    end_sec: bounds.end_sec,
+  });
+
+  activeRally = {
+    ...activeRally,
+    start_time: bounds.start_sec,
+    end_time: bounds.end_sec,
+    duration_sec: bounds.end_sec - bounds.start_sec,
+  };
+  updateReviewMeta();
+  renderShotMarkers(activeRally);
+  renderSelectedRallyDetails(activeRally);
+  updateSavedBoundaryIndicators();
+  if (boundaryNote) {
+    boundaryNote.textContent =
+      `Saved Rally ${activeRally.rally_id}: ${fmt(bounds.start_sec, 1)}s -> ${fmt(
+        bounds.end_sec,
+        1
+      )}s. Re-run saved bounds to recompute output.`;
+  }
+}
+
+function findNextRallyForActive() {
+  if (!activeRally) {
+    return null;
+  }
+  const activeKey = rallyCorrectionKey(activeRally);
+  const currentIndex = allRallies.findIndex((rally) => rallyCorrectionKey(rally) === activeKey);
+  if (currentIndex < 0) {
+    return null;
+  }
+  for (let idx = currentIndex + 1; idx < allRallies.length; idx += 1) {
+    const candidate = allRallies[idx];
+    if (!deletedRallyIds.has(rallyCorrectionKey(candidate))) {
+      return applySavedCorrectionToRally(candidate);
+    }
+  }
+  return null;
+}
+
+function mergeActiveWithNextRally() {
+  if (!activeRally) {
+    return;
+  }
+  const next = findNextRallyForActive();
+  if (!next) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "No later rally is available to merge.";
+    }
+    return;
+  }
+
+  const currentBounds = currentBoundaryInputValues() || {
+    start_sec: Number(activeRally.start_time || 0),
+    end_sec: Number(activeRally.end_time || 0),
+  };
+  const nextKey = rallyCorrectionKey(next);
+  const merged = {
+    start_sec: Math.min(currentBounds.start_sec, Number(next.start_time || 0)),
+    end_sec: Math.max(currentBounds.end_sec, Number(next.end_time || 0)),
+  };
+
+  savedBoundaryCorrections.set(rallyCorrectionKey(activeRally), {
+    rally_id: Number(activeRally.rally_id || 0),
+    start_sec: merged.start_sec,
+    end_sec: merged.end_sec,
+  });
+  deletedRallyIds.delete(rallyCorrectionKey(activeRally));
+  savedBoundaryCorrections.delete(nextKey);
+  deletedRallyIds.add(nextKey);
+
+  activeRally = {
+    ...activeRally,
+    start_time: merged.start_sec,
+    end_time: merged.end_sec,
+    duration_sec: merged.end_sec - merged.start_sec,
+  };
+  syncBoundaryInputs(activeRally);
+  updateReviewMeta();
+  renderShotMarkers(activeRally);
+  renderSelectedRallyDetails(activeRally);
+  updateSavedBoundaryIndicators();
+  if (boundaryNote) {
+    boundaryNote.textContent = `Merged Rally ${activeRally.rally_id} through Rally ${next.rally_id}. Rally ${next.rally_id} will be deleted on re-run.`;
+  }
+}
+
+function deleteActiveRally() {
+  if (!activeRally) {
+    return;
+  }
+  const key = rallyCorrectionKey(activeRally);
+  savedBoundaryCorrections.delete(key);
+  deletedRallyIds.add(key);
+  updateSavedBoundaryIndicators();
+  if (boundaryNote) {
+    boundaryNote.textContent = `Rally ${activeRally.rally_id} will be deleted when you re-run saved bounds.`;
+  }
+}
+
+function addManualWindow() {
+  const bounds = currentBoundaryInputValues();
+  if (!bounds) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "Enter a valid start/end window before adding a rally.";
+    }
+    return;
+  }
+  const id = `added-${manualAddedSeq}`;
+  manualAddedSeq += 1;
+  addedManualSegments.push({
+    id,
+    start_sec: bounds.start_sec,
+    end_sec: bounds.end_sec,
+  });
+  updateSavedBoundaryIndicators();
+  if (boundaryNote) {
+    boundaryNote.textContent = `Added manual rally window ${fmt(bounds.start_sec, 1)}s -> ${fmt(
+      bounds.end_sec,
+      1
+    )}s. Re-run saved bounds to include it.`;
   }
 }
 
@@ -1032,6 +1298,38 @@ function resetBoundaryBounds() {
     drawReviewFrame();
   }
   updateShotCaption();
+  if (boundaryNote) {
+    boundaryNote.textContent = savedBoundaryCorrections.has(rallyCorrectionKey(activeRally))
+      ? "Preview reset to detected bounds. Saved correction still exists until cleared."
+      : "Preview reset to detected bounds.";
+  }
+}
+
+function clearSavedBoundaryForActive() {
+  if (!activeRally) {
+    return;
+  }
+  const key = rallyCorrectionKey(activeRally);
+  savedBoundaryCorrections.delete(key);
+  deletedRallyIds.delete(key);
+  updateSavedBoundaryIndicators();
+  resetBoundaryBounds();
+  if (boundaryNote) {
+    boundaryNote.textContent = `Cleared saved edits for Rally ${activeRally.rally_id}.`;
+  }
+}
+
+function clearAllSavedBoundaries() {
+  savedBoundaryCorrections = new Map();
+  deletedRallyIds = new Set();
+  addedManualSegments = [];
+  updateSavedBoundaryIndicators();
+  if (activeRally) {
+    resetBoundaryBounds();
+  }
+  if (boundaryNote) {
+    boundaryNote.textContent = "Cleared all saved rally boundary corrections.";
+  }
 }
 
 function setupReviewPanel(data, rallies) {
@@ -1056,10 +1354,13 @@ function setupReviewPanel(data, rallies) {
   selectRally(rallies[0]);
 }
 
-async function submitAnalyze(event) {
-  event.preventDefault();
+async function submitAnalyze(event, manualSegments = null) {
+  if (event?.preventDefault) {
+    event.preventDefault();
+  }
 
   const mode = activeMode();
+  const usingManualSegments = Array.isArray(manualSegments) && manualSegments.length > 0;
   const includeLlm = document.getElementById("include-llm").checked;
   const llmModel = document.getElementById("llm-model").value.trim() || "gpt-4.1-mini";
   const openaiApiKey = document.getElementById("openai-api-key").value.trim();
@@ -1100,7 +1401,14 @@ async function submitAnalyze(event) {
     return;
   }
 
-  setLoading(true, "");
+  if (!usingManualSegments) {
+    savedBoundaryCorrections = new Map();
+    deletedRallyIds = new Set();
+    addedManualSegments = [];
+    updateSavedBoundaryIndicators();
+  }
+
+  setLoading(true, usingManualSegments ? "Reprocessing saved rally boundaries..." : "");
   startProgressTicker(mode, includeLlm);
 
   try {
@@ -1127,6 +1435,9 @@ async function submitAnalyze(event) {
       }
       if (maxVideoMinutes !== null && Number.isFinite(maxVideoMinutes) && maxVideoMinutes > 0) {
         body.append("max_video_minutes", String(maxVideoMinutes));
+      }
+      if (usingManualSegments) {
+        body.append("manual_segments_json", JSON.stringify(manualSegments));
       }
       if (maxRallies) {
         body.append("max_rallies", maxRallies);
@@ -1155,6 +1466,9 @@ async function submitAnalyze(event) {
       if (maxVideoMinutes !== null && Number.isFinite(maxVideoMinutes) && maxVideoMinutes > 0) {
         body.max_video_minutes = maxVideoMinutes;
       }
+      if (usingManualSegments) {
+        body.manual_segments = manualSegments;
+      }
       if (openaiApiKey) {
         body.openai_api_key = openaiApiKey;
       }
@@ -1177,13 +1491,47 @@ async function submitAnalyze(event) {
     }
 
     const data = await response.json();
+    if (usingManualSegments) {
+      savedBoundaryCorrections = new Map();
+      deletedRallyIds = new Set();
+      addedManualSegments = [];
+      updateSavedBoundaryIndicators();
+    }
     renderAll(data);
     stopProgressTicker();
-    setLoading(false, `Analysis complete. ${data.timeline.rallies.length} rallies rendered.`);
+    setLoading(
+      false,
+      `${usingManualSegments ? "Corrected analysis" : "Analysis"} complete. ${
+        data.timeline.rallies.length
+      } rallies rendered.`
+    );
   } catch (error) {
     stopProgressTicker();
     setLoading(false, String(error.message || error));
   }
+}
+
+async function rerunWithSavedBoundaries() {
+  if (!currentResult || !allRallies.length) {
+    setLoading(false, "Run an analysis before reprocessing manual boundaries.");
+    return;
+  }
+  if (!hasManualTimelineEdits()) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "Save, merge, delete, or add at least one rally window before re-running.";
+    }
+    return;
+  }
+
+  const manualSegments = buildManualSegmentsFromRallies();
+  if (!manualSegments.length) {
+    if (boundaryNote) {
+      boundaryNote.textContent = "No valid rally windows are available to re-run.";
+    }
+    return;
+  }
+
+  await submitAnalyze(null, manualSegments);
 }
 
 function renderKpis(timeline) {
@@ -1366,6 +1714,76 @@ function diagnosticValue(value, digits = 2) {
   return String(value);
 }
 
+function motionPreviewSvg(segmentation) {
+  const preview = Array.isArray(segmentation?.motion_preview) ? segmentation.motion_preview : [];
+  if (preview.length < 2) {
+    return "";
+  }
+
+  const width = 780;
+  const height = 132;
+  const margin = { top: 18, right: 16, bottom: 24, left: 38 };
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+  const minTime = Math.min(...preview.map((sample) => Number(sample.timestamp_sec || 0)));
+  const maxTime = Math.max(...preview.map((sample) => Number(sample.timestamp_sec || 0)));
+  const maxMotion = Math.max(
+    Number(segmentation.selected_threshold || 0.001) * 1.3,
+    ...preview.map((sample) => Number(sample.motion || 0))
+  );
+  const threshold = Number(segmentation.selected_threshold || 0);
+
+  const x = (timestamp) =>
+    margin.left + ((Number(timestamp) - minTime) / Math.max(0.001, maxTime - minTime)) * innerW;
+  const y = (motion) => margin.top + innerH - (Number(motion) / Math.max(0.0001, maxMotion)) * innerH;
+  const linePoints = preview
+    .map((sample) => `${x(sample.timestamp_sec).toFixed(2)},${y(sample.motion).toFixed(2)}`)
+    .join(" ");
+  const thresholdY = y(threshold);
+  const activeMarks = preview
+    .filter((sample) => Number(sample.active || 0) > 0)
+    .map(
+      (sample) =>
+        `<line x1="${x(sample.timestamp_sec).toFixed(2)}" y1="${margin.top + innerH}" x2="${x(
+          sample.timestamp_sec
+        ).toFixed(2)}" y2="${height - margin.bottom + 6}" stroke="rgba(15,157,88,0.24)" stroke-width="2"/>`
+    )
+    .join("");
+
+  return `
+    <div class="motion-preview-card">
+      <div class="motion-preview-head">
+        <strong>Motion Preview</strong>
+        <span>${escapeHtml(String(preview.length))} sampled points</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Motion preview">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
+        <line x1="${margin.left}" y1="${margin.top}" x2="${margin.left}" y2="${
+          margin.top + innerH
+        }" stroke="rgba(12,24,30,0.16)" />
+        <line x1="${margin.left}" y1="${margin.top + innerH}" x2="${
+          width - margin.right
+        }" y2="${margin.top + innerH}" stroke="rgba(12,24,30,0.16)" />
+        ${activeMarks}
+        <line x1="${margin.left}" y1="${thresholdY.toFixed(2)}" x2="${
+          width - margin.right
+        }" y2="${thresholdY.toFixed(2)}" stroke="rgba(249,110,42,0.58)" stroke-dasharray="5 5" />
+        <polyline points="${linePoints}" fill="none" stroke="#0f6f9d" stroke-width="2.4" />
+        <text x="${margin.left}" y="13" font-size="11" fill="#4a616e">motion</text>
+        <text x="${width - margin.right}" y="13" text-anchor="end" font-size="11" fill="#914419">threshold</text>
+        <text x="${margin.left}" y="${height - 5}" font-size="10" fill="#4a616e">${fmt(
+          minTime,
+          1
+        )}s</text>
+        <text x="${width - margin.right}" y="${height - 5}" text-anchor="end" font-size="10" fill="#4a616e">${fmt(
+          maxTime,
+          1
+        )}s</text>
+      </svg>
+    </div>
+  `;
+}
+
 function renderDiagnostics(diagnostics) {
   if (!diagnosticsPanel || !diagnosticsCards || !segmentPreview) {
     return;
@@ -1404,6 +1822,19 @@ function renderDiagnostics(diagnostics) {
       detail: segmentation.adaptive_used ? "adaptive threshold used" : "base threshold used",
     },
     {
+      label: "Signal",
+      value: diagnosticValue(segmentation.segment_signal || segmentation.mode || "auto"),
+      detail: `${diagnosticValue(segmentation.smoothing_window_sec, 2)}s smoothing`,
+    },
+    {
+      label: "Bridge",
+      value: `${diagnosticValue(segmentation.pre_bridge_segment_count, 0)} -> ${diagnosticValue(
+        segmentation.bridged_segment_count,
+        0
+      )}`,
+      detail: `${diagnosticValue(segmentation.bridge_gap_sec, 1)}s max bridge gap`,
+    },
+    {
       label: "Motion Samples",
       value: diagnosticValue(motion.sample_count, 0),
       detail: `${fmtPct(motion.active_sample_rate || 0)} active`,
@@ -1431,6 +1862,13 @@ function renderDiagnostics(diagnostics) {
       <p class="diagnostic-detail">${escapeHtml(card.detail)}</p>
     `;
     diagnosticsCards.appendChild(el);
+  }
+
+  const motionPreview = motionPreviewSvg(segmentation);
+  if (motionPreview) {
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = motionPreview;
+    segmentPreview.appendChild(wrapper.firstElementChild);
   }
 
   const finalSegments = Array.isArray(segmentation.final_segments)
@@ -1471,6 +1909,10 @@ function renderRallies(rallies, options = {}) {
     const node = rallyTemplate.content.firstElementChild.cloneNode(true);
     node.classList.add(`burst-${index % 3}`);
     node.dataset.rallyId = String(rally.rally_id);
+    const hasSavedCorrection = savedBoundaryCorrections.has(rallyCorrectionKey(rally));
+    const isDeleted = deletedRallyIds.has(rallyCorrectionKey(rally));
+    node.classList.toggle("corrected", hasSavedCorrection);
+    node.classList.toggle("deleted", isDeleted);
 
     const start = fmt(rally.start_time, 1);
     const end = fmt(rally.end_time, 1);
@@ -1504,6 +1946,12 @@ function renderRallies(rallies, options = {}) {
       `${playerNames.A} T ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
       `${playerNames.B} T ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
     ];
+    if (hasSavedCorrection) {
+      tags.unshift("saved bounds");
+    }
+    if (isDeleted) {
+      tags.unshift("deleted on re-run");
+    }
     for (const tagText of tags) {
       const tag = document.createElement("span");
       tag.className = "rally-tag";
@@ -1631,6 +2079,7 @@ function renderAll(data) {
     rallySort.value = "match";
   }
   applyRallySortRender();
+  updateSavedBoundaryIndicators();
   if (rallyPicker) {
     rallyPicker.value = "";
     rallyPicker.min = "1";
@@ -1734,8 +2183,36 @@ if (boundaryApplyBtn) {
   boundaryApplyBtn.addEventListener("click", previewBoundaryBounds);
 }
 
+if (boundarySaveBtn) {
+  boundarySaveBtn.addEventListener("click", saveBoundaryBounds);
+}
+
+if (boundaryMergeNextBtn) {
+  boundaryMergeNextBtn.addEventListener("click", mergeActiveWithNextRally);
+}
+
+if (boundaryDeleteBtn) {
+  boundaryDeleteBtn.addEventListener("click", deleteActiveRally);
+}
+
+if (boundaryAddBtn) {
+  boundaryAddBtn.addEventListener("click", addManualWindow);
+}
+
+if (boundaryRerunBtn) {
+  boundaryRerunBtn.addEventListener("click", rerunWithSavedBoundaries);
+}
+
 if (boundaryResetBtn) {
   boundaryResetBtn.addEventListener("click", resetBoundaryBounds);
+}
+
+if (boundaryClearBtn) {
+  boundaryClearBtn.addEventListener("click", clearSavedBoundaryForActive);
+}
+
+if (boundaryClearAllBtn) {
+  boundaryClearAllBtn.addEventListener("click", clearAllSavedBoundaries);
 }
 
 for (const input of [durationMinInput, durationMaxInput, shotsMinInput, shotsMaxInput]) {
@@ -1782,4 +2259,5 @@ if (playerBNameInput) {
 }
 
 setMode(activeMode());
+updateSavedBoundaryIndicators();
 form.addEventListener("submit", submitAnalyze);

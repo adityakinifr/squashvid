@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
+import json
 import os
+import shutil
 import tempfile
 import threading
 import uuid
@@ -19,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from squashvid.pipeline.video_source import is_url
 from squashvid.pipeline.preprocess import SEGMENTER_VERSION
-from squashvid.schemas import AnalysisResult, AnalyzeOptions, AnalyzeRequest
+from squashvid.schemas import AnalysisResult, AnalyzeOptions, AnalyzeRequest, ManualRallySegment
 
 # Supabase client for async updates
 _supabase_client = None
@@ -33,6 +34,15 @@ def get_supabase():
             from supabase import create_client
             _supabase_client = create_client(url, key)
     return _supabase_client
+
+
+def _parse_manual_segments_json(raw: str | None) -> list[ManualRallySegment] | None:
+    if raw is None or not raw.strip():
+        return None
+    payload = json.loads(raw)
+    if not isinstance(payload, list):
+        raise ValueError("manual_segments_json must be a JSON array.")
+    return [ManualRallySegment.model_validate(item) for item in payload]
 
 
 class AsyncAnalyzeRequest(BaseModel):
@@ -308,6 +318,7 @@ async def analyze_path(request: AnalyzeRequest) -> AnalysisResult:
         cv_workers=request.cv_workers,
         analysis_start_minute=request.analysis_start_minute,
         max_video_minutes=request.max_video_minutes,
+        manual_segments=request.manual_segments,
         youtube_cache_dir=request.youtube_cache_dir,
         youtube_cookies_file=request.youtube_cookies_file,
         youtube_oauth2=request.youtube_oauth2,
@@ -344,6 +355,7 @@ async def analyze_upload(
     cv_workers: int | None = Form(None, ge=1, le=128),
     analysis_start_minute: float = Form(0.0, ge=0.0, le=240.0),
     max_video_minutes: float | None = Form(None, gt=0.05, le=240.0),
+    manual_segments_json: str | None = Form(None),
     youtube_cache_dir: str | None = Form(None),
     youtube_cookies_file: str | None = Form(None),
     youtube_oauth2: bool = Form(False),
@@ -357,6 +369,7 @@ async def analyze_upload(
     try:
         tmp_file.write(await file.read())
         tmp_file.close()
+        manual_segments = _parse_manual_segments_json(manual_segments_json)
 
         options = AnalyzeOptions(
             include_llm=include_llm,
@@ -373,6 +386,7 @@ async def analyze_upload(
             cv_workers=cv_workers,
             analysis_start_minute=analysis_start_minute,
             max_video_minutes=max_video_minutes,
+            manual_segments=manual_segments,
             youtube_cache_dir=youtube_cache_dir,
             youtube_cookies_file=youtube_cookies_file,
             youtube_oauth2=youtube_oauth2,
