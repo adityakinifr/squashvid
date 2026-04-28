@@ -13,7 +13,7 @@ This project implements the architecture you described:
 
 - Splits a full match video into rally candidates.
 - Extracts per-rally shot proxies (drive, crosscourt, volley drop, boast).
-- Computes movement proxies (T recovery, T occupancy, court coverage).
+- Computes movement proxies (T recovery, T occupancy, court coverage, normalized speed, late retrievals).
 - Aggregates tactical counters:
   - `backhand_pressure_rate`
   - `boast_usage`
@@ -114,6 +114,8 @@ UI includes a **Rally Review Scrubber**:
 - player names are configurable (A/B labels become custom names across UI + insights)
 - coaching insights are rendered as visual cards for patterns, drills, and full written report sections
 - advanced controls include CV worker-process count, start minute, and optional duration
+- optional court calibration lets you override court crop and T position with normalized frame coordinates
+- selected rally details include a court-normalized movement map and expanded movement tags
 - segmentation diagnostics show analyzed window, threshold choice, signal source, bridge behavior, motion preview, candidate segments, and fallback usage
 
 Analyze by file path:
@@ -151,6 +153,11 @@ curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
   -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"manual_segments":[{"rally_id":1,"start_sec":0.4,"end_sec":34.0,"corrected":true}]}'
 
+# with manual court calibration using normalized full-frame coordinates
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"court_calibration":{"x":0.08,"y":0.04,"w":0.84,"h":0.90,"t_x":0.50,"t_y":0.62}}'
+
 # with per-request API key override
 curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
@@ -185,7 +192,13 @@ curl -X POST http://localhost:8000/analyze/upload \
   ],
   "positions": {
     "A_avg_T_recovery_sec": 0.82,
-    "B_avg_T_recovery_sec": 1.14
+    "B_avg_T_recovery_sec": 1.14,
+    "A_court_coverage": 0.24,
+    "B_court_coverage": 0.31,
+    "A_avg_speed": 0.42,
+    "B_avg_speed": 0.49,
+    "A_late_retrievals": 2,
+    "B_late_retrievals": 4
   },
   "outcome": "A winner"
 }

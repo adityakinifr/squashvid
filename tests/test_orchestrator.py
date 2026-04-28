@@ -19,7 +19,12 @@ def test_build_rallies_falls_back_to_sequential_when_process_pool_blocked(monkey
         def __init__(self, *args, **kwargs) -> None:
             raise PermissionError("blocked")
 
-    def _fake_track_segment(video_path: str, segment: Segment, frame_step: int = 4) -> SegmentTrack:
+    def _fake_track_segment(
+        video_path: str,
+        segment: Segment,
+        frame_step: int = 4,
+        court_calibration: dict | None = None,
+    ) -> SegmentTrack:
         return SegmentTrack(
             segment=segment,
             t_position=(50.0, 50.0),
@@ -57,7 +62,7 @@ def test_analyze_video_execution_uses_manual_segments(monkeypatch) -> None:
         downloaded = False
         title = None
 
-    captured: dict[str, list[Segment]] = {}
+    captured: dict[str, object] = {}
 
     def _fail_auto_segmentation(*args, **kwargs):
         raise AssertionError("automatic segmentation should not run")
@@ -67,8 +72,10 @@ def test_analyze_video_execution_uses_manual_segments(monkeypatch) -> None:
         segments: list[Segment],
         tracking_frame_step: int,
         cv_workers: int | None,
+        court_calibration: dict | None = None,
     ):
         captured["segments"] = segments
+        captured["court_calibration"] = court_calibration
         rallies = [
             RallySummary(
                 rally_id=idx,
@@ -102,11 +109,20 @@ def test_analyze_video_execution_uses_manual_segments(monkeypatch) -> None:
                     corrected=True,
                 )
             ],
+            court_calibration={
+                "x": 0.08,
+                "y": 0.04,
+                "w": 0.84,
+                "h": 0.9,
+                "t_x": 0.5,
+                "t_y": 0.62,
+            },
         ),
     )
 
     assert captured["segments"][0].start_sec == 0.4
     assert captured["segments"][0].end_sec == 34.0
+    assert captured["court_calibration"]["w"] == 0.84
     diagnostics = execution.result.timeline.diagnostics["segmentation"]
     assert diagnostics["mode"] == "manual"
     assert diagnostics["manual_override_used"] is True

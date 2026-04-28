@@ -20,7 +20,13 @@ from starlette.concurrency import run_in_threadpool
 
 from squashvid.pipeline.video_source import is_url
 from squashvid.pipeline.preprocess import SEGMENTER_VERSION
-from squashvid.schemas import AnalysisResult, AnalyzeOptions, AnalyzeRequest, ManualRallySegment
+from squashvid.schemas import (
+    AnalysisResult,
+    AnalyzeOptions,
+    AnalyzeRequest,
+    CourtCalibration,
+    ManualRallySegment,
+)
 
 # Supabase client for async updates
 _supabase_client = None
@@ -43,6 +49,15 @@ def _parse_manual_segments_json(raw: str | None) -> list[ManualRallySegment] | N
     if not isinstance(payload, list):
         raise ValueError("manual_segments_json must be a JSON array.")
     return [ManualRallySegment.model_validate(item) for item in payload]
+
+
+def _parse_court_calibration_json(raw: str | None) -> CourtCalibration | None:
+    if raw is None or not raw.strip():
+        return None
+    payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError("court_calibration_json must be a JSON object.")
+    return CourtCalibration.model_validate(payload)
 
 
 class AsyncAnalyzeRequest(BaseModel):
@@ -319,6 +334,7 @@ async def analyze_path(request: AnalyzeRequest) -> AnalysisResult:
         analysis_start_minute=request.analysis_start_minute,
         max_video_minutes=request.max_video_minutes,
         manual_segments=request.manual_segments,
+        court_calibration=request.court_calibration,
         youtube_cache_dir=request.youtube_cache_dir,
         youtube_cookies_file=request.youtube_cookies_file,
         youtube_oauth2=request.youtube_oauth2,
@@ -356,6 +372,7 @@ async def analyze_upload(
     analysis_start_minute: float = Form(0.0, ge=0.0, le=240.0),
     max_video_minutes: float | None = Form(None, gt=0.05, le=240.0),
     manual_segments_json: str | None = Form(None),
+    court_calibration_json: str | None = Form(None),
     youtube_cache_dir: str | None = Form(None),
     youtube_cookies_file: str | None = Form(None),
     youtube_oauth2: bool = Form(False),
@@ -370,6 +387,7 @@ async def analyze_upload(
         tmp_file.write(await file.read())
         tmp_file.close()
         manual_segments = _parse_manual_segments_json(manual_segments_json)
+        court_calibration = _parse_court_calibration_json(court_calibration_json)
 
         options = AnalyzeOptions(
             include_llm=include_llm,
@@ -387,6 +405,7 @@ async def analyze_upload(
             analysis_start_minute=analysis_start_minute,
             max_video_minutes=max_video_minutes,
             manual_segments=manual_segments,
+            court_calibration=court_calibration,
             youtube_cache_dir=youtube_cache_dir,
             youtube_cookies_file=youtube_cookies_file,
             youtube_oauth2=youtube_oauth2,

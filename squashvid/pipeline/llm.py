@@ -33,12 +33,26 @@ def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
 
     a_recovery = movement.get("A_avg_T_recovery_sec", 0.0)
     b_recovery = movement.get("B_avg_T_recovery_sec", 0.0)
+    a_coverage = movement.get("A_court_coverage", 0.0)
+    b_coverage = movement.get("B_court_coverage", 0.0)
+    a_speed = movement.get("A_avg_speed", 0.0)
+    b_speed = movement.get("B_avg_speed", 0.0)
+    a_late = movement.get("A_late_retrievals", 0.0)
+    b_late = movement.get("B_late_retrievals", 0.0)
 
     if a_recovery > 0 and b_recovery > 0:
         if a_recovery > b_recovery:
             key_patterns.append("Player A recovers to T slower than Player B after shots.")
         else:
             key_patterns.append("Player B recovers to T slower than Player A after shots.")
+    if a_coverage > 0 or b_coverage > 0:
+        key_patterns.append(
+            f"Court coverage proxy is Player A {a_coverage:.2f} vs Player B {b_coverage:.2f}; use it to spot who is being stretched."
+        )
+    if a_late or b_late:
+        key_patterns.append(
+            f"Late retrieval proxy counts are Player A {a_late:.0f} vs Player B {b_late:.0f}; review the rallies with clustered late recoveries."
+        )
 
     drills = [
         "Ghosting with split-step timing: 6x90 seconds, focus on immediate T recovery.",
@@ -61,6 +75,12 @@ def _local_fallback_insight(timeline: MatchTimeline) -> CoachingInsight:
         f"- B avg T recovery: **{b_recovery:.2f}s**",
         f"- A T occupancy: **{movement.get('A_T_occupancy', 0.0):.2f}**",
         f"- B T occupancy: **{movement.get('B_T_occupancy', 0.0):.2f}**",
+        f"- A court coverage proxy: **{a_coverage:.2f}**",
+        f"- B court coverage proxy: **{b_coverage:.2f}**",
+        f"- A average movement speed: **{a_speed:.2f} court/s**",
+        f"- B average movement speed: **{b_speed:.2f} court/s**",
+        f"- A late retrievals: **{a_late:.0f}**",
+        f"- B late retrievals: **{b_late:.0f}**",
         "",
         "### Coaching Adjustments",
         *[f"- {item}" for item in drills],

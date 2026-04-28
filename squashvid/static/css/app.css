@@ -253,6 +253,19 @@ body {
   margin-top: 0.6rem;
 }
 
+.advanced-help {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.calibration-grid {
+  border: 1px solid rgba(15, 111, 157, 0.14);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem;
+  background: linear-gradient(145deg, rgba(15, 111, 157, 0.05), rgba(15, 157, 88, 0.04));
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -916,6 +929,85 @@ body {
   font-size: 0.75rem;
   color: #274552;
   background: rgba(255, 255, 255, 0.8);
+}
+
+.selected-rally-map {
+  margin-top: 0.7rem;
+}
+
+.court-map-card {
+  border: 1px solid rgba(15, 111, 157, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem;
+  background:
+    radial-gradient(circle at top right, rgba(249, 110, 42, 0.1), transparent 34%),
+    linear-gradient(160deg, #fff, rgba(15, 111, 157, 0.05));
+}
+
+.court-map-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: start;
+  margin-bottom: 0.45rem;
+}
+
+.court-map-label {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #123848;
+}
+
+.court-map-sub {
+  margin: 0.12rem 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.court-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 0.45rem;
+  font-size: 0.72rem;
+  color: #395666;
+}
+
+.court-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+}
+
+.court-map-legend i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-a {
+  background: #0f9d58;
+}
+
+.legend-b {
+  background: #0f6f9d;
+}
+
+.court-map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 230px;
+}
+
+.court-zone-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.74rem;
 }
 
 .selected-rally-shots {

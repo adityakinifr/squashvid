@@ -112,9 +112,9 @@ def _can_use_process_pool() -> bool:
 
 
 def _track_rally_payload(
-    task: tuple[int, str, Segment, int],
+    task: tuple[int, str, Segment, int, dict | None],
 ) -> tuple[int, dict | None]:
-    rally_id, local_video_path, segment, tracking_frame_step = task
+    rally_id, local_video_path, segment, tracking_frame_step, court_calibration = task
 
     try:
         import cv2
@@ -127,6 +127,7 @@ def _track_rally_payload(
         local_video_path,
         segment,
         frame_step=tracking_frame_step,
+        court_calibration=court_calibration,
     )
     if not track.observations:
         return rally_id, None
@@ -140,6 +141,7 @@ def _build_rallies(
     segments: list[Segment],
     tracking_frame_step: int,
     cv_workers: int | None,
+    court_calibration: dict | None = None,
 ) -> tuple[list[RallySummary], int]:
     if not segments:
         return [], 1
@@ -152,6 +154,7 @@ def _build_rallies(
                 local_video_path,
                 segment,
                 frame_step=tracking_frame_step,
+                court_calibration=court_calibration,
             )
             if not track.observations:
                 continue
@@ -159,7 +162,7 @@ def _build_rallies(
         return rallies, 1
 
     tasks = [
-        (idx, local_video_path, segment, tracking_frame_step)
+        (idx, local_video_path, segment, tracking_frame_step, court_calibration)
         for idx, segment in enumerate(segments, start=1)
     ]
     try:
@@ -173,6 +176,7 @@ def _build_rallies(
                 local_video_path,
                 segment,
                 frame_step=tracking_frame_step,
+                court_calibration=court_calibration,
             )
             if not track.observations:
                 continue
@@ -233,12 +237,18 @@ def analyze_video_execution(
             start_offset_sec=start_offset_sec,
         )
     segments = segmentation.segments
+    court_calibration = (
+        opts.court_calibration.model_dump(mode="python")
+        if opts.court_calibration is not None
+        else None
+    )
 
     rallies, worker_count = _build_rallies(
         local_video_path=local_video_path,
         segments=segments,
         tracking_frame_step=opts.tracking_frame_step,
         cv_workers=opts.cv_workers,
+        court_calibration=court_calibration,
     )
 
     fps = float(meta["fps"])
@@ -283,6 +293,8 @@ def analyze_video_execution(
             f"Source downloaded from YouTube{title_info} to: {local_video_path}"
         )
     timeline.notes.append(f"CV workers used: {worker_count}.")
+    if court_calibration is not None:
+        timeline.notes.append("Manual court calibration was applied to player movement metrics.")
     end_label = f"{effective_end_sec:.1f}s" if effective_end_sec > 0.0 else "source end"
     max_minutes_label = (
         f"{opts.max_video_minutes:.1f} minutes"

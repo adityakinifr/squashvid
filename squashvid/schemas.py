@@ -29,6 +29,12 @@ class RallyPositions(BaseModel):
     B_T_occupancy: float | None = None
     A_court_coverage: float | None = None
     B_court_coverage: float | None = None
+    A_avg_speed: float | None = None
+    B_avg_speed: float | None = None
+    A_max_speed: float | None = None
+    B_max_speed: float | None = None
+    A_late_retrievals: int | None = None
+    B_late_retrievals: int | None = None
 
 
 class RallySummary(BaseModel):
@@ -74,6 +80,15 @@ class ManualRallySegment(BaseModel):
     corrected: bool = False
 
 
+class CourtCalibration(BaseModel):
+    x: float = Field(..., ge=0.0, le=1.0)
+    y: float = Field(..., ge=0.0, le=1.0)
+    w: float = Field(..., ge=0.01, le=1.0)
+    h: float = Field(..., ge=0.01, le=1.0)
+    t_x: float = Field(..., ge=0.0, le=1.0)
+    t_y: float = Field(..., ge=0.0, le=1.0)
+
+
 class AnalyzeRequest(BaseModel):
     video_path: str
     include_llm: bool = True
@@ -91,6 +106,7 @@ class AnalyzeRequest(BaseModel):
     analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     manual_segments: list[ManualRallySegment] | None = None
+    court_calibration: CourtCalibration | None = None
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False
@@ -112,6 +128,7 @@ class AnalyzeOptions(BaseModel):
     analysis_start_minute: float = Field(default=0.0, ge=0.0, le=240.0)
     max_video_minutes: float | None = Field(default=None, gt=0.05, le=240.0)
     manual_segments: list[ManualRallySegment] | None = None
+    court_calibration: CourtCalibration | None = None
     youtube_cache_dir: str | None = None
     youtube_cookies_file: str | None = None
     youtube_oauth2: bool = False

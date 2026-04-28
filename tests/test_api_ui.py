@@ -13,6 +13,8 @@ def test_ui_home_and_assets() -> None:
     assert home.status_code == 200
     assert "text/html" in home.headers.get("content-type", "")
     assert "SquashVid" in home.text
+    assert "Court Left" in home.text
+    assert "shot-type-filter" in home.text
 
     css = client.get("/static/css/app.css")
     js = client.get("/static/js/app.js")
@@ -42,3 +44,20 @@ def test_analyze_request_accepts_manual_segments() -> None:
     assert request.manual_segments is not None
     assert request.manual_segments[0].start_sec == 0.4
     assert request.manual_segments[0].corrected is True
+
+
+def test_analyze_request_accepts_court_calibration() -> None:
+    request = AnalyzeRequest(
+        video_path="/tmp/demo.mp4",
+        court_calibration={
+            "x": 0.08,
+            "y": 0.04,
+            "w": 0.84,
+            "h": 0.9,
+            "t_x": 0.5,
+            "t_y": 0.62,
+        },
+    )
+
+    assert request.court_calibration is not None
+    assert request.court_calibration.w == 0.84

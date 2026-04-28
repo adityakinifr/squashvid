@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import permutations
+from typing import Any
 
 import cv2
 import numpy as np
@@ -75,7 +77,6 @@ def _assign_players(
     candidates: list[_Candidate],
     max_jump: float = 160.0,
 ) -> dict[str, tuple[float, float] | None]:
-    updated = {"A": previous.get("A"), "B": previous.get("B")}
     points = [(c.x, c.y) for c in candidates[:4]]
 
     if not points:
@@ -87,27 +88,46 @@ def _assign_players(
             return {"A": points[0], "B": None}
         return {"A": points[0], "B": points[-1]}
 
-    available = points.copy()
-    for label in ("A", "B"):
-        prev_point = previous.get(label)
-        if prev_point is None or not available:
+    best: tuple[float, tuple[float, float] | None, tuple[float, float] | None] | None = None
+    candidates_for_pair: list[tuple[float, float] | None] = [*points, None]
+    for point_a, point_b in permutations(candidates_for_pair, 2):
+        if point_a is None and point_b is None:
             continue
-        nearest = min(available, key=lambda p: _distance(prev_point, p))
-        if _distance(prev_point, nearest) <= max_jump:
-            updated[label] = nearest
-            available.remove(nearest)
-        else:
-            updated[label] = None
+        if point_a is not None and point_b is not None and point_a == point_b:
+            continue
 
-    for label in ("A", "B"):
-        if updated[label] is None and available:
-            updated[label] = available.pop(0)
+        cost = 0.0
+        valid = True
+        for label, point in (("A", point_a), ("B", point_b)):
+            prev_point = previous.get(label)
+            if point is None:
+                cost += max_jump * 0.9
+                continue
+            if prev_point is None:
+                cost += 20.0
+                continue
+            dist = _distance(prev_point, point)
+            if dist > max_jump:
+                valid = False
+                break
+            cost += dist
 
-    if updated["A"] is None and updated["B"] is not None:
-        updated["A"] = updated["B"]
-        updated["B"] = None
+        if not valid:
+            continue
+        if best is None or cost < best[0]:
+            best = (cost, point_a, point_b)
 
-    return updated
+    if best is not None:
+        return {"A": best[1], "B": best[2]}
+
+    points.sort(key=lambda p: p[0])
+    if len(points) == 1:
+        prev_a = previous.get("A")
+        prev_b = previous.get("B")
+        if prev_b is not None and (prev_a is None or _distance(prev_b, points[0]) < _distance(prev_a, points[0])):
+            return {"A": None, "B": points[0]}
+        return {"A": points[0], "B": None}
+    return {"A": points[0], "B": points[-1]}
 
 
 def _assign_ball(
@@ -126,11 +146,144 @@ def _assign_ball(
     return nearest if _distance(previous_ball, nearest) <= max_jump else None
 
 
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _resolve_court_metadata(
+    frame_size: tuple[int, int],
+    detected_t: tuple[float, float] | None,
+    court_calibration: dict[str, Any] | None,
+) -> tuple[tuple[float, float] | None, dict[str, Any]]:
+    frame_w, frame_h = frame_size
+    if frame_w <= 0 or frame_h <= 0:
+        return detected_t, {"mode": "unavailable"}
+
+    if court_calibration:
+        x = _clamp01(float(court_calibration.get("x", 0.0)))
+        y = _clamp01(float(court_calibration.get("y", 0.0)))
+        w = _clamp01(float(court_calibration.get("w", 1.0)))
+        h = _clamp01(float(court_calibration.get("h", 1.0)))
+        if x + w > 1.0:
+            w = max(0.01, 1.0 - x)
+        if y + h > 1.0:
+            h = max(0.01, 1.0 - y)
+        t_x = _clamp01(float(court_calibration.get("t_x", 0.5)))
+        t_y = _clamp01(float(court_calibration.get("t_y", 0.62)))
+        t_position = (t_x * frame_w, t_y * frame_h)
+        return t_position, {
+            "mode": "manual",
+            "rect_norm": {"x": x, "y": y, "w": w, "h": h},
+            "t_norm": {"x": t_x, "y": t_y},
+        }
+
+    t_position = detected_t
+    if t_position is None:
+        t_position = (frame_w / 2.0, frame_h * 0.62)
+    return t_position, {
+        "mode": "auto",
+        "rect_norm": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+        "t_norm": {
+            "x": round(float(t_position[0] / frame_w), 5),
+            "y": round(float(t_position[1] / frame_h), 5),
+        },
+    }
+
+
+def _interpolate_short_gaps(
+    values: list[tuple[float, float] | None],
+    max_gap: int,
+) -> tuple[list[tuple[float, float] | None], int]:
+    filled = values[:]
+    fill_count = 0
+    idx = 0
+    while idx < len(filled):
+        if filled[idx] is not None:
+            idx += 1
+            continue
+        start = idx
+        while idx < len(filled) and filled[idx] is None:
+            idx += 1
+        end = idx
+        gap_len = end - start
+        left = filled[start - 1] if start > 0 else None
+        right = filled[end] if end < len(filled) else None
+        if left is None or right is None or gap_len > max_gap:
+            continue
+        for offset in range(gap_len):
+            alpha = float(offset + 1) / float(gap_len + 1)
+            filled[start + offset] = (
+                left[0] + (right[0] - left[0]) * alpha,
+                left[1] + (right[1] - left[1]) * alpha,
+            )
+            fill_count += 1
+    return filled, fill_count
+
+
+def _smooth_positions(
+    values: list[tuple[float, float] | None],
+    window: int,
+) -> list[tuple[float, float] | None]:
+    if window <= 1:
+        return values
+
+    radius = max(1, window // 2)
+    smoothed: list[tuple[float, float] | None] = []
+    for idx, value in enumerate(values):
+        if value is None:
+            smoothed.append(None)
+            continue
+        neighbors = [
+            values[j]
+            for j in range(max(0, idx - radius), min(len(values), idx + radius + 1))
+            if values[j] is not None
+        ]
+        if not neighbors:
+            smoothed.append(value)
+            continue
+        smoothed.append(
+            (
+                float(np.mean([p[0] for p in neighbors])),
+                float(np.mean([p[1] for p in neighbors])),
+            )
+        )
+    return smoothed
+
+
+def _smooth_player_tracks(
+    observations: list[FrameObservation],
+    max_gap: int = 3,
+    window: int = 3,
+) -> dict[str, Any]:
+    diagnostics: dict[str, Any] = {
+        "gap_fills": {"A": 0, "B": 0},
+        "raw_samples": {"A": 0, "B": 0},
+        "smoothed_samples": {"A": 0, "B": 0},
+        "max_gap_frames": max_gap,
+        "smoothing_window": window,
+    }
+    if not observations:
+        return diagnostics
+
+    for label in ("A", "B"):
+        values = [obs.player_positions.get(label) for obs in observations]
+        diagnostics["raw_samples"][label] = sum(1 for item in values if item is not None)
+        filled, fill_count = _interpolate_short_gaps(values, max_gap=max_gap)
+        smoothed = _smooth_positions(filled, window=window)
+        diagnostics["gap_fills"][label] = fill_count
+        diagnostics["smoothed_samples"][label] = sum(1 for item in smoothed if item is not None)
+        for obs, point in zip(observations, smoothed):
+            obs.player_positions[label] = point
+
+    return diagnostics
+
+
 def track_segment(
     video_path: str,
     segment: Segment,
     frame_step: int = 4,
     downscale_width: int = 640,
+    court_calibration: dict[str, Any] | None = None,
 ) -> SegmentTrack:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -146,7 +299,9 @@ def track_segment(
     player_state: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
     ball_state: tuple[float, float] | None = None
     observations: list[FrameObservation] = []
+    detected_t_position: tuple[float, float] | None = None
     t_position: tuple[float, float] | None = None
+    court_metadata: dict[str, Any] = {"mode": "pending"}
     frame_size = (0, 0)
 
     while frame_index <= end_frame:
@@ -161,8 +316,13 @@ def track_segment(
             h, w = frame.shape[:2]
 
         frame_size = (w, h)
-        if t_position is None:
-            t_position = _detect_t_position(frame)
+        if detected_t_position is None:
+            detected_t_position = _detect_t_position(frame)
+            t_position, court_metadata = _resolve_court_metadata(
+                frame_size=frame_size,
+                detected_t=detected_t_position,
+                court_calibration=court_calibration,
+            )
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -206,10 +366,20 @@ def track_segment(
         frame_index += 1 + skipped
 
     cap.release()
+    tracking_diagnostics = _smooth_player_tracks(observations)
+    if detected_t_position is not None and frame_size[0] and frame_size[1]:
+        court_metadata["detected_t_norm"] = {
+            "x": round(float(detected_t_position[0] / frame_size[0]), 5),
+            "y": round(float(detected_t_position[1] / frame_size[1]), 5),
+        }
 
     return SegmentTrack(
         segment=segment,
         t_position=t_position,
         frame_size=frame_size,
         observations=observations,
+        metadata={
+            "court_calibration": court_metadata,
+            "player_tracking": tracking_diagnostics,
+        },
     )

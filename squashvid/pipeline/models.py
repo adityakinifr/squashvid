@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -27,3 +28,4 @@ class SegmentTrack:
     t_position: tuple[float, float] | None
     frame_size: tuple[int, int]
     observations: list[FrameObservation] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

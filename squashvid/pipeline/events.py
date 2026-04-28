@@ -13,6 +13,43 @@ def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return float(np.hypot(a[0] - b[0], a[1] - b[1]))
 
 
+def _court_rect(track: SegmentTrack) -> tuple[float, float, float, float]:
+    frame_w, frame_h = track.frame_size
+    calibration = track.metadata.get("court_calibration", {}) if track.metadata else {}
+    rect = calibration.get("rect_norm", {}) if isinstance(calibration, dict) else {}
+    x = float(rect.get("x", 0.0)) * frame_w
+    y = float(rect.get("y", 0.0)) * frame_h
+    w = max(1.0, float(rect.get("w", 1.0)) * frame_w)
+    h = max(1.0, float(rect.get("h", 1.0)) * frame_h)
+    return x, y, w, h
+
+
+def _normalize_to_court(
+    track: SegmentTrack,
+    point: tuple[float, float] | None,
+) -> tuple[float, float] | None:
+    if point is None or track.frame_size[0] <= 0 or track.frame_size[1] <= 0:
+        return None
+    rect_x, rect_y, rect_w, rect_h = _court_rect(track)
+    return (
+        max(0.0, min(1.0, (point[0] - rect_x) / rect_w)),
+        max(0.0, min(1.0, (point[1] - rect_y) / rect_h)),
+    )
+
+
+def _zone_for_point(point: tuple[float, float]) -> str:
+    x, y = point
+    depth = "front" if y < 0.34 else "back" if y > 0.66 else "mid"
+    side = "left" if x < 0.42 else "right" if x > 0.58 else "center"
+    return f"{depth}_{side}"
+
+
+def _court_t_position(track: SegmentTrack) -> tuple[float, float] | None:
+    if track.t_position is None:
+        return None
+    return _normalize_to_court(track, track.t_position)
+
+
 def _nearest_player(
     obs: FrameObservation,
     ball: tuple[float, float],
@@ -126,23 +163,38 @@ def _compute_t_metrics(track: SegmentTrack, shots: list[ShotEvent]) -> RallyPosi
     if not track.observations or track.t_position is None:
         return RallyPositions()
 
-    t_pos = track.t_position
-    frame_w, frame_h = track.frame_size
-    radius = min(frame_w, frame_h) * 0.12 if frame_w and frame_h else 40.0
+    t_pos = _court_t_position(track)
+    if t_pos is None:
+        return RallyPositions()
+    radius = 0.13
 
     occupancy_counts = {"A": 0, "B": 0}
     available_counts = {"A": 0, "B": 0}
     coverage_points: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    speed_samples: dict[str, list[float]] = defaultdict(list)
+    late_retrievals = {"A": 0, "B": 0}
+    previous_points: dict[str, tuple[float, tuple[float, float]] | None] = {"A": None, "B": None}
 
     for obs in track.observations:
         for label in ("A", "B"):
-            p = obs.player_positions.get(label)
+            p = _normalize_to_court(track, obs.player_positions.get(label))
             if p is None:
                 continue
             available_counts[label] += 1
             coverage_points[label].append(p)
             if _distance(p, t_pos) <= radius:
                 occupancy_counts[label] += 1
+
+            prev = previous_points.get(label)
+            if prev is not None:
+                prev_t, prev_p = prev
+                dt = max(0.001, obs.timestamp - prev_t)
+                speed = _distance(prev_p, p) / dt
+                if speed < 5.0:
+                    speed_samples[label].append(speed)
+                    if speed > 0.42 and _distance(p, t_pos) > 0.28:
+                        late_retrievals[label] += 1
+            previous_points[label] = (obs.timestamp, p)
 
     recovery_times: dict[str, list[float]] = defaultdict(list)
     for shot in shots:
@@ -152,7 +204,7 @@ def _compute_t_metrics(track: SegmentTrack, shots: list[ShotEvent]) -> RallyPosi
         for obs in track.observations:
             if obs.timestamp <= shot.timestamp:
                 continue
-            p = obs.player_positions.get(player)
+            p = _normalize_to_court(track, obs.player_positions.get(player))
             if p is None:
                 continue
             if _distance(p, t_pos) <= radius:
@@ -160,13 +212,12 @@ def _compute_t_metrics(track: SegmentTrack, shots: list[ShotEvent]) -> RallyPosi
                 break
 
     def _coverage(points: list[tuple[float, float]]) -> float | None:
-        if len(points) < 2 or frame_w == 0 or frame_h == 0:
+        if len(points) < 2:
             return None
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
         bbox_area = (max(xs) - min(xs)) * (max(ys) - min(ys))
-        court_area = float(frame_w * frame_h)
-        return float(bbox_area / court_area) if court_area else None
+        return float(max(0.0, min(1.0, bbox_area)))
 
     a_occ = (occupancy_counts["A"] / available_counts["A"]) if available_counts["A"] else None
     b_occ = (occupancy_counts["B"] / available_counts["B"]) if available_counts["B"] else None
@@ -178,7 +229,44 @@ def _compute_t_metrics(track: SegmentTrack, shots: list[ShotEvent]) -> RallyPosi
         B_T_occupancy=b_occ,
         A_court_coverage=_coverage(coverage_points["A"]),
         B_court_coverage=_coverage(coverage_points["B"]),
+        A_avg_speed=mean(speed_samples["A"]) if speed_samples["A"] else None,
+        B_avg_speed=mean(speed_samples["B"]) if speed_samples["B"] else None,
+        A_max_speed=max(speed_samples["A"]) if speed_samples["A"] else None,
+        B_max_speed=max(speed_samples["B"]) if speed_samples["B"] else None,
+        A_late_retrievals=late_retrievals["A"],
+        B_late_retrievals=late_retrievals["B"],
     )
+
+
+def _movement_metadata(track: SegmentTrack) -> dict[str, object]:
+    zone_counts: dict[str, dict[str, int]] = {"A": defaultdict(int), "B": defaultdict(int)}
+    path_preview: dict[str, list[dict[str, float]]] = {"A": [], "B": []}
+    stride = max(1, len(track.observations) // 40) if track.observations else 1
+
+    for idx, obs in enumerate(track.observations):
+        for label in ("A", "B"):
+            point = _normalize_to_court(track, obs.player_positions.get(label))
+            if point is None:
+                continue
+            zone_counts[label][_zone_for_point(point)] += 1
+            if idx % stride == 0:
+                path_preview[label].append(
+                    {
+                        "t": round(float(obs.timestamp), 3),
+                        "x": round(float(point[0]), 4),
+                        "y": round(float(point[1]), 4),
+                    }
+                )
+
+    def _sorted_zones(label: str) -> dict[str, int]:
+        return dict(sorted(zone_counts[label].items(), key=lambda item: item[0]))
+
+    return {
+        "court_calibration": track.metadata.get("court_calibration", {}),
+        "player_tracking": track.metadata.get("player_tracking", {}),
+        "court_zones": {"A": _sorted_zones("A"), "B": _sorted_zones("B")},
+        "movement_path_preview": path_preview,
+    }
 
 
 def _infer_outcome(track: SegmentTrack, shots: list[ShotEvent]) -> str:
@@ -306,6 +394,7 @@ def rally_from_track(track: SegmentTrack, rally_id: int) -> RallySummary:
             "shot_count": len(shots),
             "frame_samples": len(track.observations),
             "focus_crop_norm": focus_crop,
+            "movement": _movement_metadata(track),
         },
     )
 
@@ -326,6 +415,12 @@ def aggregate_match(
     b_t_recovery: list[float] = []
     a_occ: list[float] = []
     b_occ: list[float] = []
+    a_coverage: list[float] = []
+    b_coverage: list[float] = []
+    a_speed: list[float] = []
+    b_speed: list[float] = []
+    a_late = 0
+    b_late = 0
 
     for rally in rallies:
         for shot in rally.shots:
@@ -345,6 +440,18 @@ def aggregate_match(
             a_occ.append(rally.positions.A_T_occupancy)
         if rally.positions.B_T_occupancy is not None:
             b_occ.append(rally.positions.B_T_occupancy)
+        if rally.positions.A_court_coverage is not None:
+            a_coverage.append(rally.positions.A_court_coverage)
+        if rally.positions.B_court_coverage is not None:
+            b_coverage.append(rally.positions.B_court_coverage)
+        if rally.positions.A_avg_speed is not None:
+            a_speed.append(rally.positions.A_avg_speed)
+        if rally.positions.B_avg_speed is not None:
+            b_speed.append(rally.positions.B_avg_speed)
+        if rally.positions.A_late_retrievals is not None:
+            a_late += rally.positions.A_late_retrievals
+        if rally.positions.B_late_retrievals is not None:
+            b_late += rally.positions.B_late_retrievals
 
     tactical = {
         "backhand_pressure_rate": (backhand_count / shot_total) if shot_total else 0.0,
@@ -360,6 +467,12 @@ def aggregate_match(
         "B_avg_T_recovery_sec": mean(b_t_recovery) if b_t_recovery else 0.0,
         "A_T_occupancy": mean(a_occ) if a_occ else 0.0,
         "B_T_occupancy": mean(b_occ) if b_occ else 0.0,
+        "A_court_coverage": mean(a_coverage) if a_coverage else 0.0,
+        "B_court_coverage": mean(b_coverage) if b_coverage else 0.0,
+        "A_avg_speed": mean(a_speed) if a_speed else 0.0,
+        "B_avg_speed": mean(b_speed) if b_speed else 0.0,
+        "A_late_retrievals": float(a_late),
+        "B_late_retrievals": float(b_late),
     }
 
     notes = [

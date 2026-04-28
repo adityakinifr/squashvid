@@ -24,6 +24,7 @@ const durationMinInput = document.getElementById("duration-min");
 const durationMaxInput = document.getElementById("duration-max");
 const shotsMinInput = document.getElementById("shots-min");
 const shotsMaxInput = document.getElementById("shots-max");
+const shotTypeFilter = document.getElementById("shot-type-filter");
 const rallyPicker = document.getElementById("rally-picker");
 const rallyPickerBtn = document.getElementById("rally-picker-btn");
 const rallyToolbarStatus = document.getElementById("rally-toolbar-status");
@@ -36,6 +37,7 @@ const rallyScrubber = document.getElementById("rally-scrubber");
 const shotMarkers = document.getElementById("shot-markers");
 const shotCaption = document.getElementById("shot-caption");
 const selectedRallyKpis = document.getElementById("selected-rally-kpis");
+const selectedRallyMap = document.getElementById("selected-rally-map");
 const selectedRallyShots = document.getElementById("selected-rally-shots");
 const boundaryStartInput = document.getElementById("boundary-start");
 const boundaryEndInput = document.getElementById("boundary-end");
@@ -49,6 +51,12 @@ const boundaryResetBtn = document.getElementById("boundary-reset");
 const boundaryClearBtn = document.getElementById("boundary-clear");
 const boundaryClearAllBtn = document.getElementById("boundary-clear-all");
 const boundaryNote = document.getElementById("boundary-note");
+const courtLeftInput = document.getElementById("court-left");
+const courtTopInput = document.getElementById("court-top");
+const courtWidthInput = document.getElementById("court-width");
+const courtHeightInput = document.getElementById("court-height");
+const courtTXInput = document.getElementById("court-t-x");
+const courtTYInput = document.getElementById("court-t-y");
 
 const insightPanel = document.getElementById("insight-panel");
 const insightModel = document.getElementById("insight-model");
@@ -208,6 +216,54 @@ function parsePositiveNumber(value, fallback = null) {
     return fallback;
   }
   return parsed;
+}
+
+function buildCourtCalibration() {
+  const fields = [
+    { key: "x", label: "Court Left", input: courtLeftInput, min: 0, max: 1 },
+    { key: "y", label: "Court Top", input: courtTopInput, min: 0, max: 1 },
+    { key: "w", label: "Court Width", input: courtWidthInput, min: 0.01, max: 1 },
+    { key: "h", label: "Court Height", input: courtHeightInput, min: 0.01, max: 1 },
+    { key: "t_x", label: "T X", input: courtTXInput, min: 0, max: 1 },
+    { key: "t_y", label: "T Y", input: courtTYInput, min: 0, max: 1 },
+  ];
+
+  const rawValues = fields.map((field) => ({
+    ...field,
+    raw: field.input?.value ?? "",
+  }));
+  const hasAny = rawValues.some((field) => String(field.raw).trim() !== "");
+  if (!hasAny) {
+    return { calibration: null, error: "" };
+  }
+
+  const calibration = {};
+  for (const field of rawValues) {
+    const raw = String(field.raw).trim();
+    if (!raw) {
+      return {
+        calibration: null,
+        error: "Fill all court calibration fields, or leave all of them blank for automatic calibration.",
+      };
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < field.min || value > field.max) {
+      return {
+        calibration: null,
+        error: `${field.label} must be between ${field.min} and ${field.max}.`,
+      };
+    }
+    calibration[field.key] = value;
+  }
+
+  if (calibration.x + calibration.w > 1.0001) {
+    return { calibration: null, error: "Court Left + Court Width must be 1.0 or less." };
+  }
+  if (calibration.y + calibration.h > 1.0001) {
+    return { calibration: null, error: "Court Top + Court Height must be 1.0 or less." };
+  }
+
+  return { calibration, error: "" };
 }
 
 function cloneRallyForReview(rally) {
@@ -755,6 +811,19 @@ function rallyPassesFilters(rally) {
     return false;
   }
 
+  const shotTypeValue = shotTypeFilter?.value || "all";
+  if (shotTypeValue !== "all") {
+    const shots = Array.isArray(rally?.shots) ? rally.shots : [];
+    const hasShot = shots.some((shot) => {
+      const type = String(shot?.type || "").toLowerCase();
+      const side = String(shot?.side || "").toLowerCase();
+      return type === shotTypeValue || side === shotTypeValue;
+    });
+    if (!hasShot) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -818,6 +887,7 @@ function applyRallySortRender() {
   } else if (displayedRallies.length === 0) {
     activeRally = null;
     clearChildren(selectedRallyKpis);
+    clearChildren(selectedRallyMap);
     clearChildren(selectedRallyShots);
     clearChildren(shotMarkers);
     shotCaption.textContent = "";
@@ -857,6 +927,9 @@ function jumpToRallyById(rallyId) {
   }
   if (shotsMaxInput) {
     shotsMaxInput.value = "";
+  }
+  if (shotTypeFilter) {
+    shotTypeFilter.value = "all";
   }
   applyRallySortRender();
   selectRally(target);
@@ -951,8 +1024,143 @@ function summarizeShotTypes(shots) {
     .map(([name, count]) => `${name} x${count}`);
 }
 
+function formatMetricValue(value, kind = "number", digits = 1) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a";
+  }
+  if (kind === "pct") {
+    return fmtPct(value, digits);
+  }
+  if (kind === "seconds") {
+    return `${fmt(value, digits)}s`;
+  }
+  if (kind === "speed") {
+    return `${fmt(value, digits)} court/s`;
+  }
+  if (kind === "count") {
+    return String(Math.round(Number(value)));
+  }
+  return fmt(value, digits);
+}
+
+function courtTNormFromMovement(movement) {
+  const calibration = movement?.court_calibration || {};
+  const rect = calibration?.rect_norm || { x: 0, y: 0, w: 1, h: 1 };
+  const t = calibration?.t_norm || { x: 0.5, y: 0.62 };
+  const rectW = Math.max(0.001, Number(rect.w ?? 1));
+  const rectH = Math.max(0.001, Number(rect.h ?? 1));
+  return {
+    x: clamp((Number(t.x ?? 0.5) - Number(rect.x ?? 0)) / rectW, 0, 1),
+    y: clamp((Number(t.y ?? 0.62) - Number(rect.y ?? 0)) / rectH, 0, 1),
+  };
+}
+
+function movementPathPolyline(points, bounds) {
+  if (!Array.isArray(points) || points.length < 2) {
+    return "";
+  }
+  return points
+    .map((point) => {
+      const x = bounds.x + clamp(Number(point.x ?? 0), 0, 1) * bounds.w;
+      const y = bounds.y + clamp(Number(point.y ?? 0), 0, 1) * bounds.h;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function movementPathDots(points, bounds, color) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return "";
+  }
+  const sampled = points.filter((_, idx) => idx % Math.max(1, Math.floor(points.length / 8)) === 0);
+  return sampled
+    .map((point) => {
+      const x = bounds.x + clamp(Number(point.x ?? 0), 0, 1) * bounds.w;
+      const y = bounds.y + clamp(Number(point.y ?? 0), 0, 1) * bounds.h;
+      return `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2.8" fill="${color}" opacity="0.75" />`;
+    })
+    .join("");
+}
+
+function topCourtZones(zones) {
+  if (!zones || typeof zones !== "object") {
+    return "";
+  }
+  return Object.entries(zones)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 2)
+    .map(([zone]) => zone.replaceAll("_", " "))
+    .join(", ");
+}
+
+function renderSelectedRallyCourtMap(rally) {
+  clearChildren(selectedRallyMap);
+  const movement = rally?.metadata?.movement || {};
+  const preview = movement?.movement_path_preview || {};
+  const aPath = Array.isArray(preview.A) ? preview.A : [];
+  const bPath = Array.isArray(preview.B) ? preview.B : [];
+  if (aPath.length < 2 && bPath.length < 2) {
+    const empty = document.createElement("p");
+    empty.className = "selected-rally-empty";
+    empty.textContent = "No movement path preview available for this rally.";
+    selectedRallyMap.appendChild(empty);
+    return;
+  }
+
+  const bounds = { x: 24, y: 18, w: 272, h: 174 };
+  const t = courtTNormFromMovement(movement);
+  const tX = bounds.x + t.x * bounds.w;
+  const tY = bounds.y + t.y * bounds.h;
+  const aPolyline = movementPathPolyline(aPath, bounds);
+  const bPolyline = movementPathPolyline(bPath, bounds);
+  const aZones = topCourtZones(movement?.court_zones?.A);
+  const bZones = topCourtZones(movement?.court_zones?.B);
+  const mode = movement?.court_calibration?.mode || "auto";
+
+  const card = document.createElement("article");
+  card.className = "court-map-card";
+  card.innerHTML = `
+    <div class="court-map-head">
+      <div>
+        <p class="court-map-label">Movement Map</p>
+        <p class="court-map-sub">Court-normalized paths | calibration: ${escapeHtml(mode)}</p>
+      </div>
+      <div class="court-map-legend">
+        <span><i class="legend-a"></i>${escapeHtml(playerNames.A)}</span>
+        <span><i class="legend-b"></i>${escapeHtml(playerNames.B)}</span>
+      </div>
+    </div>
+    <svg class="court-map-svg" viewBox="0 0 320 212" role="img" aria-label="Selected rally movement map">
+      <defs>
+        <linearGradient id="courtSurface" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stop-color="#f8fffb" />
+          <stop offset="100%" stop-color="#e9f4f6" />
+        </linearGradient>
+      </defs>
+      <rect x="${bounds.x}" y="${bounds.y}" width="${bounds.w}" height="${bounds.h}" rx="12" fill="url(#courtSurface)" stroke="rgba(12,24,30,0.22)" />
+      <line x1="${bounds.x}" y1="${(bounds.y + bounds.h * 0.34).toFixed(2)}" x2="${bounds.x + bounds.w}" y2="${(bounds.y + bounds.h * 0.34).toFixed(2)}" stroke="rgba(12,24,30,0.16)" stroke-dasharray="4 4" />
+      <line x1="${bounds.x}" y1="${(bounds.y + bounds.h * 0.66).toFixed(2)}" x2="${bounds.x + bounds.w}" y2="${(bounds.y + bounds.h * 0.66).toFixed(2)}" stroke="rgba(12,24,30,0.16)" stroke-dasharray="4 4" />
+      <line x1="${(bounds.x + bounds.w * 0.5).toFixed(2)}" y1="${bounds.y}" x2="${(bounds.x + bounds.w * 0.5).toFixed(2)}" y2="${bounds.y + bounds.h}" stroke="rgba(12,24,30,0.12)" />
+      ${aPolyline ? `<polyline points="${aPolyline}" fill="none" stroke="#0f9d58" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.82" />` : ""}
+      ${bPolyline ? `<polyline points="${bPolyline}" fill="none" stroke="#0f6f9d" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.82" />` : ""}
+      ${movementPathDots(aPath, bounds, "#0f9d58")}
+      ${movementPathDots(bPath, bounds, "#0f6f9d")}
+      <circle cx="${tX.toFixed(2)}" cy="${tY.toFixed(2)}" r="7" fill="#f96e2a" opacity="0.9" />
+      <text x="${(tX + 10).toFixed(2)}" y="${(tY + 4).toFixed(2)}" font-size="10" fill="#914419" font-weight="700">T</text>
+      <text x="${bounds.x + 8}" y="${bounds.y + 14}" font-size="10" fill="#4a616e">front</text>
+      <text x="${bounds.x + 8}" y="${bounds.y + bounds.h - 8}" font-size="10" fill="#4a616e">back</text>
+    </svg>
+    <div class="court-zone-summary">
+      <span>${escapeHtml(playerNames.A)} zones: ${escapeHtml(aZones || "n/a")}</span>
+      <span>${escapeHtml(playerNames.B)} zones: ${escapeHtml(bZones || "n/a")}</span>
+    </div>
+  `;
+  selectedRallyMap.appendChild(card);
+}
+
 function renderSelectedRallyDetails(rally) {
   clearChildren(selectedRallyKpis);
+  clearChildren(selectedRallyMap);
   clearChildren(selectedRallyShots);
   if (!rally) {
     return;
@@ -961,10 +1169,16 @@ function renderSelectedRallyDetails(rally) {
   const tags = [
     `Duration ${fmt(rally.duration_sec, 1)}s`,
     `Shots ${rallyShotsCount(rally)}`,
-    `${playerNames.A} T ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
-    `${playerNames.B} T ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
-    `${playerNames.A} recover ${rally.positions?.A_avg_T_recovery_sec ? `${fmt(rally.positions.A_avg_T_recovery_sec)}s` : "n/a"}`,
-    `${playerNames.B} recover ${rally.positions?.B_avg_T_recovery_sec ? `${fmt(rally.positions.B_avg_T_recovery_sec)}s` : "n/a"}`,
+    `${playerNames.A} T ${formatMetricValue(rally.positions?.A_T_occupancy, "pct")}`,
+    `${playerNames.B} T ${formatMetricValue(rally.positions?.B_T_occupancy, "pct")}`,
+    `${playerNames.A} recover ${formatMetricValue(rally.positions?.A_avg_T_recovery_sec, "seconds")}`,
+    `${playerNames.B} recover ${formatMetricValue(rally.positions?.B_avg_T_recovery_sec, "seconds")}`,
+    `${playerNames.A} coverage ${formatMetricValue(rally.positions?.A_court_coverage, "pct")}`,
+    `${playerNames.B} coverage ${formatMetricValue(rally.positions?.B_court_coverage, "pct")}`,
+    `${playerNames.A} speed ${formatMetricValue(rally.positions?.A_avg_speed, "speed")}`,
+    `${playerNames.B} speed ${formatMetricValue(rally.positions?.B_avg_speed, "speed")}`,
+    `${playerNames.A} late ${formatMetricValue(rally.positions?.A_late_retrievals, "count")}`,
+    `${playerNames.B} late ${formatMetricValue(rally.positions?.B_late_retrievals, "count")}`,
   ];
   for (const text of tags) {
     const el = document.createElement("span");
@@ -972,6 +1186,7 @@ function renderSelectedRallyDetails(rally) {
     el.textContent = text;
     selectedRallyKpis.appendChild(el);
   }
+  renderSelectedRallyCourtMap(rally);
 
   const shots = Array.isArray(rally.shots) ? rally.shots : [];
   if (!shots.length) {
@@ -1339,6 +1554,7 @@ function setupReviewPanel(data, rallies) {
     activeRally = null;
     selectedOriginalBounds = null;
     clearChildren(selectedRallyKpis);
+    clearChildren(selectedRallyMap);
     clearChildren(selectedRallyShots);
     stopReviewLoop();
     return;
@@ -1401,6 +1617,12 @@ async function submitAnalyze(event, manualSegments = null) {
     return;
   }
 
+  const { calibration: courtCalibration, error: courtCalibrationError } = buildCourtCalibration();
+  if (courtCalibrationError) {
+    setLoading(false, courtCalibrationError);
+    return;
+  }
+
   if (!usingManualSegments) {
     savedBoundaryCorrections = new Map();
     deletedRallyIds = new Set();
@@ -1439,6 +1661,9 @@ async function submitAnalyze(event, manualSegments = null) {
       if (usingManualSegments) {
         body.append("manual_segments_json", JSON.stringify(manualSegments));
       }
+      if (courtCalibration) {
+        body.append("court_calibration_json", JSON.stringify(courtCalibration));
+      }
       if (maxRallies) {
         body.append("max_rallies", maxRallies);
       }
@@ -1468,6 +1693,9 @@ async function submitAnalyze(event, manualSegments = null) {
       }
       if (usingManualSegments) {
         body.manual_segments = manualSegments;
+      }
+      if (courtCalibration) {
+        body.court_calibration = courtCalibration;
       }
       if (openaiApiKey) {
         body.openai_api_key = openaiApiKey;
@@ -1589,25 +1817,22 @@ function renderMovementCards(movement) {
   clearChildren(movementCards);
 
   const items = [
-    [`${playerNames.A} Avg T Recovery`, movement.A_avg_T_recovery_sec, "s"],
-    [`${playerNames.B} Avg T Recovery`, movement.B_avg_T_recovery_sec, "s"],
-    [`${playerNames.A} T Occupancy`, movement.A_T_occupancy, "%"],
-    [`${playerNames.B} T Occupancy`, movement.B_T_occupancy, "%"],
+    [`${playerNames.A} Avg T Recovery`, movement.A_avg_T_recovery_sec, "seconds"],
+    [`${playerNames.B} Avg T Recovery`, movement.B_avg_T_recovery_sec, "seconds"],
+    [`${playerNames.A} T Occupancy`, movement.A_T_occupancy, "pct"],
+    [`${playerNames.B} T Occupancy`, movement.B_T_occupancy, "pct"],
+    [`${playerNames.A} Court Coverage`, movement.A_court_coverage, "pct"],
+    [`${playerNames.B} Court Coverage`, movement.B_court_coverage, "pct"],
+    [`${playerNames.A} Avg Speed`, movement.A_avg_speed, "speed"],
+    [`${playerNames.B} Avg Speed`, movement.B_avg_speed, "speed"],
+    [`${playerNames.A} Late Retrievals`, movement.A_late_retrievals, "count"],
+    [`${playerNames.B} Late Retrievals`, movement.B_late_retrievals, "count"],
   ];
 
-  for (const [label, value, unit] of items) {
+  for (const [label, value, kind] of items) {
     const node = movementTemplate.content.firstElementChild.cloneNode(true);
     node.querySelector(".movement-label").textContent = label;
-
-    let text = "n/a";
-    if (value !== null && value !== undefined) {
-      if (unit === "%") {
-        text = fmtPct(value);
-      } else {
-        text = `${fmt(value, 2)}${unit}`;
-      }
-    }
-    node.querySelector(".movement-value").textContent = text;
+    node.querySelector(".movement-value").textContent = formatMetricValue(value, kind, 2);
     movementCards.appendChild(node);
   }
 }
@@ -1943,8 +2168,10 @@ function renderRallies(rallies, options = {}) {
     const tags = [
       `${fmt(rally.duration_sec, 1)}s`,
       `${rallyShotsCount(rally)} shots`,
-      `${playerNames.A} T ${rally.positions?.A_T_occupancy !== null && rally.positions?.A_T_occupancy !== undefined ? fmtPct(rally.positions.A_T_occupancy) : "n/a"}`,
-      `${playerNames.B} T ${rally.positions?.B_T_occupancy !== null && rally.positions?.B_T_occupancy !== undefined ? fmtPct(rally.positions.B_T_occupancy) : "n/a"}`,
+      `${playerNames.A} T ${formatMetricValue(rally.positions?.A_T_occupancy, "pct")}`,
+      `${playerNames.B} T ${formatMetricValue(rally.positions?.B_T_occupancy, "pct")}`,
+      `${playerNames.A} cov ${formatMetricValue(rally.positions?.A_court_coverage, "pct")}`,
+      `${playerNames.B} cov ${formatMetricValue(rally.positions?.B_court_coverage, "pct")}`,
     ];
     if (hasSavedCorrection) {
       tags.unshift("saved bounds");
@@ -2075,6 +2302,9 @@ function renderAll(data) {
   if (shotsMaxInput) {
     shotsMaxInput.value = "";
   }
+  if (shotTypeFilter) {
+    shotTypeFilter.value = "all";
+  }
   if (rallySort) {
     rallySort.value = "match";
   }
@@ -2172,7 +2402,14 @@ function onRallyFilterChange() {
   }
 }
 
-for (const input of [winnerFilter, durationMinInput, durationMaxInput, shotsMinInput, shotsMaxInput]) {
+for (const input of [
+  winnerFilter,
+  durationMinInput,
+  durationMaxInput,
+  shotsMinInput,
+  shotsMaxInput,
+  shotTypeFilter,
+]) {
   if (!input) {
     continue;
   }

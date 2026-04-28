@@ -34,6 +34,17 @@ def _make_track() -> SegmentTrack:
         t_position=(50.0, 55.0),
         frame_size=(100, 100),
         observations=observations,
+        metadata={
+            "court_calibration": {
+                "mode": "manual",
+                "rect_norm": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8},
+                "t_norm": {"x": 0.5, "y": 0.55},
+            },
+            "player_tracking": {
+                "gap_fills": {"A": 1, "B": 0},
+                "smoothed_samples": {"A": len(observations), "B": len(observations)},
+            },
+        },
     )
 
 
@@ -49,6 +60,14 @@ def test_rally_and_match_aggregation() -> None:
     rally = rally_from_track(track, rally_id=1)
     crop = rally.metadata.get("focus_crop_norm", {})
     assert {"x", "y", "w", "h"}.issubset(set(crop.keys()))
+    movement = rally.metadata.get("movement", {})
+    assert movement["court_calibration"]["mode"] == "manual"
+    assert "court_zones" in movement
+    assert movement["movement_path_preview"]["A"]
+    assert rally.positions.A_court_coverage is not None
+    assert rally.positions.A_avg_speed is not None
+    assert rally.positions.A_late_retrievals is not None
+
     timeline = aggregate_match(
         video_path="/tmp/demo.mp4",
         fps=30.0,
@@ -58,3 +77,6 @@ def test_rally_and_match_aggregation() -> None:
 
     assert timeline.tactical_patterns["avg_shots_per_rally"] >= 0
     assert "A_avg_T_recovery_sec" in timeline.movement_summary
+    assert "A_court_coverage" in timeline.movement_summary
+    assert "A_avg_speed" in timeline.movement_summary
+    assert "A_late_retrievals" in timeline.movement_summary
