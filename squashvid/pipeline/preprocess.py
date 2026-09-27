@@ -9,13 +9,23 @@ import numpy as np
 
 from squashvid.pipeline.models import Segment
 
-SEGMENTER_VERSION = "adaptive-v5-smoothed-bridged"
+SEGMENTER_VERSION = "adaptive-v7-scene-guard"
 
 
 @dataclass(slots=True)
 class SegmentationResult:
     segments: list[Segment]
     diagnostics: dict[str, Any]
+
+
+@dataclass(slots=True)
+class SceneChange:
+    timestamp_sec: float
+    kind: str
+    diff_score: float
+    motion_ratio: float
+    brightness: float
+    bright_ratio: float
 
 
 def read_video_metadata(video_path: str) -> dict[str, float | int]:
@@ -47,6 +57,163 @@ def _frame_motion_ratio(previous_gray: np.ndarray, current_gray: np.ndarray) -> 
     diff = cv2.absdiff(previous_gray, current_gray)
     _, mask = cv2.threshold(diff, 24, 255, cv2.THRESH_BINARY)
     return float(np.count_nonzero(mask) / mask.size)
+
+
+def _frame_scene_diff(previous_gray: np.ndarray, current_gray: np.ndarray) -> float:
+    diff = cv2.absdiff(previous_gray, current_gray)
+    return float(np.mean(diff) / 255.0)
+
+
+def _classify_scene_change(
+    *,
+    has_previous: bool,
+    scene_diff: float,
+    motion_ratio: float,
+    brightness: float,
+    brightness_std: float,
+    bright_ratio: float,
+) -> str | None:
+    is_white_flash = (
+        (brightness >= 220.0 and bright_ratio >= 0.62)
+        or (brightness >= 245.0 and brightness_std <= 12.0)
+    )
+    if is_white_flash:
+        return "flash"
+
+    if not has_previous:
+        return None
+
+    is_hard_cut = scene_diff >= 0.28 and motion_ratio >= 0.82
+    if is_hard_cut:
+        return "cut"
+
+    return None
+
+
+def _scene_exclusion_intervals(
+    scene_changes: list[SceneChange],
+    start_sec: float,
+    end_sec: float,
+) -> list[tuple[float, float]]:
+    intervals: list[tuple[float, float]] = []
+    for change in scene_changes:
+        if change.kind == "flash":
+            pre_pad_sec = 0.45
+            post_pad_sec = 0.90
+        else:
+            pre_pad_sec = 0.25
+            post_pad_sec = 0.65
+
+        start = max(start_sec, change.timestamp_sec - pre_pad_sec)
+        end = min(end_sec, change.timestamp_sec + post_pad_sec)
+        if end > start:
+            intervals.append((start, end))
+
+    if not intervals:
+        return []
+
+    intervals.sort(key=lambda item: item[0])
+    merged: list[tuple[float, float]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+            continue
+        prev_start, prev_end = merged[-1]
+        merged[-1] = (prev_start, max(prev_end, end))
+    return merged
+
+
+def _suppress_motion_samples(
+    motion_samples: list[tuple[float, float]],
+    intervals: list[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], int]:
+    if not intervals:
+        return motion_samples, 0
+
+    suppressed: list[tuple[float, float]] = []
+    interval_idx = 0
+    suppressed_count = 0
+
+    for timestamp, ratio in motion_samples:
+        while interval_idx < len(intervals) and timestamp > intervals[interval_idx][1]:
+            interval_idx += 1
+
+        in_transition = (
+            interval_idx < len(intervals)
+            and intervals[interval_idx][0] <= timestamp <= intervals[interval_idx][1]
+        )
+        if in_transition:
+            suppressed.append((timestamp, 0.0))
+            if ratio > 0.0:
+                suppressed_count += 1
+        else:
+            suppressed.append((timestamp, ratio))
+
+    return suppressed, suppressed_count
+
+
+def _split_segments_on_scene_intervals(
+    segments: list[Segment],
+    intervals: list[tuple[float, float]],
+    min_piece_sec: float,
+) -> list[Segment]:
+    if not segments or not intervals:
+        return segments
+
+    split_segments: list[Segment] = []
+    for segment in segments:
+        pieces = [(segment.start_sec, segment.end_sec)]
+        for cut_start, cut_end in intervals:
+            if cut_end <= segment.start_sec or cut_start >= segment.end_sec:
+                continue
+
+            next_pieces: list[tuple[float, float]] = []
+            for piece_start, piece_end in pieces:
+                if cut_end <= piece_start or cut_start >= piece_end:
+                    next_pieces.append((piece_start, piece_end))
+                    continue
+                if piece_start < cut_start:
+                    next_pieces.append((piece_start, min(cut_start, piece_end)))
+                if cut_end < piece_end:
+                    next_pieces.append((max(cut_end, piece_start), piece_end))
+            pieces = next_pieces
+
+        for piece_start, piece_end in pieces:
+            if piece_end - piece_start >= min_piece_sec:
+                split_segments.append(Segment(start_sec=piece_start, end_sec=piece_end))
+
+    return split_segments
+
+
+def _scene_changes_payload(
+    scene_changes: list[SceneChange],
+    limit: int = 80,
+) -> list[dict[str, float | str]]:
+    return [
+        {
+            "timestamp_sec": round(float(change.timestamp_sec), 3),
+            "kind": change.kind,
+            "diff_score": round(float(change.diff_score), 4),
+            "motion_ratio": round(float(change.motion_ratio), 4),
+            "brightness": round(float(change.brightness), 2),
+            "bright_ratio": round(float(change.bright_ratio), 4),
+        }
+        for change in scene_changes[:limit]
+    ]
+
+
+def _intervals_payload(
+    intervals: list[tuple[float, float]],
+    limit: int = 80,
+) -> list[dict[str, float]]:
+    return [
+        {
+            "start_sec": round(float(start), 3),
+            "end_sec": round(float(end), 3),
+            "duration_sec": round(float(end - start), 3),
+        }
+        for start, end in intervals[:limit]
+    ]
 
 
 def _segments_from_motion_samples(
@@ -155,6 +322,23 @@ def _extend_segment_tails(
         padded.append(Segment(start_sec=seg.start_sec, end_sec=end))
 
     return padded[:max_rallies] if max_rallies is not None else padded
+
+
+def _extend_first_rally_start(
+    segments: list[Segment],
+    start_offset_sec: float,
+    max_leading_gap_sec: float,
+) -> tuple[list[Segment], bool]:
+    if not segments:
+        return [], False
+
+    first = segments[0]
+    leading_gap = first.start_sec - start_offset_sec
+    if leading_gap <= 0.0 or leading_gap > max_leading_gap_sec:
+        return segments, False
+
+    extended = [Segment(start_sec=start_offset_sec, end_sec=first.end_sec), *segments[1:]]
+    return extended, True
 
 
 def _adaptive_segments_from_samples(
@@ -424,6 +608,7 @@ def detect_active_segments_with_diagnostics(
 
     previous_gray: np.ndarray | None = None
     motion_samples: list[tuple[float, float]] = []
+    scene_changes: list[SceneChange] = []
 
     max_duration = float(max_duration_sec) if max_duration_sec is not None else None
     if max_duration is not None and max_duration <= 0.0:
@@ -443,16 +628,41 @@ def detect_active_segments_with_diagnostics(
             scale = downscale_width / width
             frame = cv2.resize(frame, (downscale_width, int(height * scale)))
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        gray_raw = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray_raw, (5, 5), 0)
 
         motion_ratio = 0.0
+        scene_diff = 0.0
+        has_previous = previous_gray is not None
         if previous_gray is not None:
             motion_ratio = _frame_motion_ratio(previous_gray, gray)
+            scene_diff = _frame_scene_diff(previous_gray, gray)
+        brightness = float(np.mean(gray_raw))
+        brightness_std = float(np.std(gray_raw))
+        bright_ratio = float(np.count_nonzero(gray_raw >= 235) / gray_raw.size)
         previous_gray = gray
 
         # Timestamp is absolute (includes start offset)
         timestamp = start_offset_sec + (index / fps)
+        scene_kind = _classify_scene_change(
+            has_previous=has_previous,
+            scene_diff=scene_diff,
+            motion_ratio=motion_ratio,
+            brightness=brightness,
+            brightness_std=brightness_std,
+            bright_ratio=bright_ratio,
+        )
+        if scene_kind is not None:
+            scene_changes.append(
+                SceneChange(
+                    timestamp_sec=timestamp,
+                    kind=scene_kind,
+                    diff_score=scene_diff,
+                    motion_ratio=motion_ratio,
+                    brightness=brightness,
+                    bright_ratio=bright_ratio,
+                )
+            )
         motion_samples.append((timestamp, motion_ratio))
 
         index += 1
@@ -475,6 +685,17 @@ def detect_active_segments_with_diagnostics(
         total_duration = min(total_duration, start_offset_sec + max_duration)
     total_duration = max(start_offset_sec, total_duration)
     analysis_duration = max(0.0, total_duration - start_offset_sec)
+
+    raw_motion_samples = motion_samples
+    scene_intervals = _scene_exclusion_intervals(
+        scene_changes=scene_changes,
+        start_sec=start_offset_sec,
+        end_sec=total_duration,
+    )
+    motion_samples, suppressed_sample_count = _suppress_motion_samples(
+        motion_samples=raw_motion_samples,
+        intervals=scene_intervals,
+    )
 
     smoothing_window_sec = max(0.6, min(1.2, idle_gap_sec * 0.7))
     smoothed_motion_samples = _smooth_motion_samples(
@@ -560,7 +781,7 @@ def detect_active_segments_with_diagnostics(
                 segment_signal = "adaptive"
                 adaptive_used = True
 
-    merge_gap_sec = min(2.4, max(idle_gap_sec * 1.5, idle_gap_sec + 0.5))
+    merge_gap_sec = min(3.2, max(idle_gap_sec * 1.8, idle_gap_sec + 0.8))
     pre_merge_segments = segments
     segments = _merge_close_segments(
         segments=segments,
@@ -568,29 +789,47 @@ def detect_active_segments_with_diagnostics(
         max_rallies=None,
     )
     merged_segments = segments
-    bridge_gap_sec = min(5.0, max(idle_gap_sec * 3.0, idle_gap_sec + 2.4))
+    bridge_gap_sec = min(6.5, max(idle_gap_sec * 4.2, idle_gap_sec + 4.0))
     pre_bridge_segments = segments
     segments = _bridge_fragmented_segments(
         segments=segments,
         bridge_gap_sec=bridge_gap_sec,
-        fragment_sec=max(12.0, min_rally_sec * 3.5),
+        fragment_sec=max(12.0, min_rally_sec * 3.0),
         max_merged_sec=max(45.0, min(90.0, analysis_duration * 0.55 if analysis_duration else 75.0)),
     )
     bridged_segments = segments
+    tail_pad_sec = min(3.2, max(idle_gap_sec + 1.8, idle_gap_sec * 2.5))
     segments = _extend_segment_tails(
         segments=segments,
-        tail_pad_sec=min(1.4, idle_gap_sec + 0.2),
+        tail_pad_sec=tail_pad_sec,
         total_duration=total_duration,
         max_rallies=None,
     )
+    pre_scene_split_segments = segments
+    scene_min_piece_sec = max(1.0, min_rally_sec * 0.5)
+    segments = _split_segments_on_scene_intervals(
+        segments=segments,
+        intervals=scene_intervals,
+        min_piece_sec=scene_min_piece_sec,
+    )
+    scene_split_segments = segments
 
-    leading_context_sec = max(8.0, min(14.0, min_rally_sec * 2.8))
-    leading_extension_used = False
-    if segments and start_offset_sec < segments[0].start_sec:
-        leading_gap_sec = segments[0].start_sec - start_offset_sec
-        if leading_gap_sec <= leading_context_sec:
-            segments[0] = Segment(start_sec=start_offset_sec, end_sec=segments[0].end_sec)
-            leading_extension_used = True
+    leading_context_sec = min(40.0, max(24.0, min_rally_sec * 8.5))
+    leading_extension_blocked_by_scene = False
+    if segments:
+        first_segment = segments[0]
+        leading_extension_blocked_by_scene = any(
+            interval_end > start_offset_sec and interval_start < first_segment.start_sec
+            for interval_start, interval_end in scene_intervals
+        )
+    if leading_extension_blocked_by_scene:
+        leading_extension_used = False
+    else:
+        segments, leading_extension_used = _extend_first_rally_start(
+            segments=segments,
+            start_offset_sec=start_offset_sec,
+            max_leading_gap_sec=leading_context_sec,
+        )
 
     min_full_segment_sec = min(min_rally_sec, 1.0)
     fallback_used = False
@@ -622,18 +861,29 @@ def detect_active_segments_with_diagnostics(
         "fallback_full_window_used": fallback_used,
         "merge_gap_sec": round(float(merge_gap_sec), 3),
         "bridge_gap_sec": round(float(bridge_gap_sec), 3),
-        "tail_pad_sec": round(float(min(1.4, idle_gap_sec + 0.2)), 3),
+        "tail_pad_sec": round(float(tail_pad_sec), 3),
+        "scene_guard_enabled": True,
+        "scene_change_count": len(scene_changes),
+        "scene_exclusion_interval_count": len(scene_intervals),
+        "scene_suppressed_sample_count": suppressed_sample_count,
+        "scene_min_piece_sec": round(float(scene_min_piece_sec), 3),
         "leading_context_sec": round(float(leading_context_sec), 3),
         "leading_extension_used": leading_extension_used,
+        "leading_extension_blocked_by_scene": leading_extension_blocked_by_scene,
         "base_segment_count": len(base_segments),
         "smoothed_segment_count": len(smoothed_segments),
         "pre_merge_segment_count": len(pre_merge_segments),
         "merged_segment_count": len(merged_segments),
         "pre_bridge_segment_count": len(pre_bridge_segments),
         "bridged_segment_count": len(bridged_segments),
+        "pre_scene_split_segment_count": len(pre_scene_split_segments),
+        "scene_split_segment_count": len(scene_split_segments),
         "final_segment_count": len(final_segments),
         "motion": _motion_diagnostic_payload(motion_samples, selected_threshold),
+        "raw_motion": _motion_diagnostic_payload(raw_motion_samples, selected_threshold),
         "motion_preview": _motion_preview_payload(motion_samples, selected_threshold),
+        "scene_changes": _scene_changes_payload(scene_changes),
+        "scene_exclusion_intervals": _intervals_payload(scene_intervals),
         "base_segments": _segments_diagnostic_payload(
             base_segments,
             motion_samples=motion_samples,
@@ -656,6 +906,16 @@ def detect_active_segments_with_diagnostics(
         ),
         "bridged_segments": _segments_diagnostic_payload(
             bridged_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
+        "pre_scene_split_segments": _segments_diagnostic_payload(
+            pre_scene_split_segments,
+            motion_samples=motion_samples,
+            threshold=selected_threshold,
+        ),
+        "scene_split_segments": _segments_diagnostic_payload(
+            scene_split_segments,
             motion_samples=motion_samples,
             threshold=selected_threshold,
         ),

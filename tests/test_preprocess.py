@@ -45,6 +45,17 @@ class _FakeCapture:
         return None
 
 
+def _stable_frame(value: int = 90) -> np.ndarray:
+    return np.full((120, 160, 3), value, dtype=np.uint8)
+
+
+def _active_frame(index: int) -> np.ndarray:
+    frame = _stable_frame()
+    x = 8 + (index % 9) * 12
+    frame[38:86, x : x + 34] = 220
+    return frame
+
+
 def test_detect_active_segments_uses_observed_duration_when_frame_count_missing(
     monkeypatch,
 ) -> None:
@@ -180,6 +191,67 @@ def test_bridge_fragmented_segments_merges_short_rally_splits() -> None:
     assert bridged[0].start_sec == 8.0
     assert bridged[0].end_sec == 31.0
     assert bridged[1].start_sec == 49.0
+
+
+def test_first_rally_can_extend_back_to_analysis_start() -> None:
+    segments = [
+        preprocess.Segment(start_sec=24.8, end_sec=31.0),
+        preprocess.Segment(start_sec=60.0, end_sec=74.0),
+    ]
+
+    extended, used = preprocess._extend_first_rally_start(
+        segments=segments,
+        start_offset_sec=0.0,
+        max_leading_gap_sec=35.0,
+    )
+
+    assert used is True
+    assert extended[0].start_sec == 0.0
+    assert extended[0].end_sec == 31.0
+    assert extended[1].start_sec == 60.0
+
+
+def test_first_rally_does_not_extend_over_long_intro() -> None:
+    segments = [preprocess.Segment(start_sec=55.0, end_sec=70.0)]
+
+    extended, used = preprocess._extend_first_rally_start(
+        segments=segments,
+        start_offset_sec=0.0,
+        max_leading_gap_sec=35.0,
+    )
+
+    assert used is False
+    assert extended[0].start_sec == 55.0
+
+
+def test_scene_guard_removes_flash_from_next_rally_start(monkeypatch) -> None:
+    fps = 10.0
+    frames: list[np.ndarray] = []
+    for idx in range(220):
+        if idx <= 55:
+            frames.append(_active_frame(idx))
+        elif 110 <= idx <= 112:
+            frames.append(np.full((120, 160, 3), 255, dtype=np.uint8))
+        elif 120 <= idx <= 180:
+            frames.append(_active_frame(idx))
+        else:
+            frames.append(_stable_frame())
+
+    fake_cap = _FakeCapture(frames=frames, fps=fps, frame_count=len(frames))
+    monkeypatch.setattr(preprocess.cv2, "VideoCapture", lambda _: fake_cap)
+
+    result = preprocess.detect_active_segments_with_diagnostics(
+        video_path="/tmp/fake.mp4",
+        motion_threshold=0.02,
+        min_rally_sec=3.0,
+        idle_gap_sec=1.2,
+        frame_step=1,
+    )
+
+    assert len(result.segments) >= 2
+    assert result.segments[1].start_sec >= 12.0
+    assert result.diagnostics["scene_change_count"] >= 1
+    assert result.diagnostics["scene_suppressed_sample_count"] >= 1
 
 
 def test_motion_preview_payload_is_downsampled() -> None:

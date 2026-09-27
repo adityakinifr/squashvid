@@ -109,7 +109,7 @@ function setMode(mode) {
     sourceInput.placeholder = "https://www.youtube.com/watch?v=...";
   }
   if (mode === "path") {
-    sourceInput.placeholder = "/absolute/path/to/match.mp4";
+    sourceInput.placeholder = "Example: /Users/you/Videos/match.mp4";
   }
 }
 
@@ -251,7 +251,7 @@ function buildCourtCalibration() {
     if (!raw) {
       return {
         calibration: null,
-        error: "Fill all court calibration fields, or leave all of them blank for automatic calibration.",
+        error: "Fill every court setup field, or leave them all blank for automatic setup.",
       };
     }
     const value = Number(raw);
@@ -265,10 +265,10 @@ function buildCourtCalibration() {
   }
 
   if (calibration.x + calibration.w > 1.0001) {
-    return { calibration: null, error: "Court Left + Court Width must be 1.0 or less." };
+    return { calibration: null, error: "Court left edge plus court width must stay inside the video." };
   }
   if (calibration.y + calibration.h > 1.0001) {
-    return { calibration: null, error: "Court Top + Court Height must be 1.0 or less." };
+    return { calibration: null, error: "Court top edge plus court height must stay inside the video." };
   }
 
   return { calibration, error: "" };
@@ -746,11 +746,11 @@ function startProgressTicker(mode, includeLlm) {
   progressStartTs = Date.now();
   const messages = [
     mode === "youtube"
-      ? "Downloading YouTube video (or loading from cache)..."
+      ? "Preparing YouTube video..."
       : "Loading video source...",
-    "Segmenting rallies from match motion...",
-    "Tracking players and ball inside rally windows...",
-    includeLlm ? "Generating coaching insight with LLM..." : "Skipping LLM and building local report...",
+    "Finding rallies...",
+    "Reading movement inside each rally...",
+    includeLlm ? "Writing coaching insights..." : "Building a local coaching summary...",
     "Finalizing dashboard output...",
   ];
 
@@ -763,7 +763,7 @@ function startProgressTicker(mode, includeLlm) {
       return;
     }
     const elapsed = Math.floor((Date.now() - progressStartTs) / 1000);
-    statusText.textContent = `Still processing (${elapsed}s). Tip: reduce max rallies or increase frame-step values for faster runs.`;
+    statusText.textContent = `Still processing (${elapsed}s). Tip: review fewer rallies or use faster settings for quicker runs.`;
   }, 8000);
 }
 
@@ -1131,7 +1131,7 @@ function renderSelectedRallyCourtMap(rally) {
     <div class="court-map-head">
       <div>
         <p class="court-map-label">Movement Map</p>
-        <p class="court-map-sub">Court-normalized paths | calibration: ${escapeHtml(mode)}</p>
+        <p class="court-map-sub">Movement paths | setup: ${escapeHtml(mode)}</p>
       </div>
       <div class="court-map-legend">
         <span><i class="legend-a"></i>${escapeHtml(playerNames.A)}</span>
@@ -1291,12 +1291,12 @@ function syncBoundaryInputs(rally) {
     const saved = savedBoundaryCorrections.has(rallyCorrectionKey(rally));
     const deleted = deletedRallyIds.has(rallyCorrectionKey(rally));
     if (deleted) {
-      boundaryNote.textContent = `Rally ${rally.rally_id} is marked for deletion on re-run.`;
+      boundaryNote.textContent = `Rally ${rally.rally_id} will be removed when you analyze saved clips.`;
     } else if (saved) {
-      boundaryNote.textContent = `Saved bounds for Rally ${rally.rally_id}. Re-run saved bounds to recompute shots and coaching.`;
+      boundaryNote.textContent = `Saved clip times for Rally ${rally.rally_id}. Analyze saved clips to refresh shots and coaching.`;
     } else {
       boundaryNote.textContent =
-        "Save, merge, delete, or add rally windows, then re-run to recompute shots and coaching output.";
+        "Adjust rally clips, then analyze saved clips to refresh shots and coaching.";
     }
   }
   updateSavedBoundaryIndicators();
@@ -1356,7 +1356,7 @@ function previewBoundaryBounds() {
   updateShotCaption();
   if (boundaryNote) {
     boundaryNote.textContent =
-      "Previewing adjusted bounds locally. Save them before re-running analysis.";
+      "Previewing adjusted clip times. Save them before analyzing saved clips.";
   }
 }
 
@@ -1395,7 +1395,7 @@ function saveBoundaryBounds() {
       `Saved Rally ${activeRally.rally_id}: ${fmt(bounds.start_sec, 1)}s -> ${fmt(
         bounds.end_sec,
         1
-      )}s. Re-run saved bounds to recompute output.`;
+      )}s. Analyze saved clips to refresh the dashboard.`;
   }
 }
 
@@ -1460,7 +1460,7 @@ function mergeActiveWithNextRally() {
   renderSelectedRallyDetails(activeRally);
   updateSavedBoundaryIndicators();
   if (boundaryNote) {
-    boundaryNote.textContent = `Merged Rally ${activeRally.rally_id} through Rally ${next.rally_id}. Rally ${next.rally_id} will be deleted on re-run.`;
+    boundaryNote.textContent = `Merged Rally ${activeRally.rally_id} through Rally ${next.rally_id}. Rally ${next.rally_id} will be removed when you analyze saved clips.`;
   }
 }
 
@@ -1473,7 +1473,7 @@ function deleteActiveRally() {
   deletedRallyIds.add(key);
   updateSavedBoundaryIndicators();
   if (boundaryNote) {
-    boundaryNote.textContent = `Rally ${activeRally.rally_id} will be deleted when you re-run saved bounds.`;
+    boundaryNote.textContent = `Rally ${activeRally.rally_id} will be removed when you analyze saved clips.`;
   }
 }
 
@@ -1481,7 +1481,7 @@ function addManualWindow() {
   const bounds = currentBoundaryInputValues();
   if (!bounds) {
     if (boundaryNote) {
-      boundaryNote.textContent = "Enter a valid start/end window before adding a rally.";
+      boundaryNote.textContent = "Enter valid clip start and end times before adding a rally.";
     }
     return;
   }
@@ -1494,10 +1494,10 @@ function addManualWindow() {
   });
   updateSavedBoundaryIndicators();
   if (boundaryNote) {
-    boundaryNote.textContent = `Added manual rally window ${fmt(bounds.start_sec, 1)}s -> ${fmt(
+    boundaryNote.textContent = `Added rally clip ${fmt(bounds.start_sec, 1)}s -> ${fmt(
       bounds.end_sec,
       1
-    )}s. Re-run saved bounds to include it.`;
+    )}s. Analyze saved clips to include it.`;
   }
 }
 
@@ -1523,8 +1523,8 @@ function resetBoundaryBounds() {
   updateShotCaption();
   if (boundaryNote) {
     boundaryNote.textContent = savedBoundaryCorrections.has(rallyCorrectionKey(activeRally))
-      ? "Preview reset to detected bounds. Saved correction still exists until cleared."
-      : "Preview reset to detected bounds.";
+      ? "Preview reset to the original clip times. Saved edit still exists until cleared."
+      : "Preview reset to the original clip times.";
   }
 }
 
@@ -1551,7 +1551,7 @@ function clearAllSavedBoundaries() {
     resetBoundaryBounds();
   }
   if (boundaryNote) {
-    boundaryNote.textContent = "Cleared all saved rally boundary corrections.";
+    boundaryNote.textContent = "Cleared all saved rally clip edits.";
   }
 }
 
@@ -1749,12 +1749,12 @@ async function submitAnalyze(event, manualSegments = null) {
 
 async function rerunWithSavedBoundaries() {
   if (!currentResult || !allRallies.length) {
-    setLoading(false, "Run an analysis before reprocessing manual boundaries.");
+    setLoading(false, "Run an analysis before updating saved rally clips.");
     return;
   }
   if (!hasManualTimelineEdits()) {
     if (boundaryNote) {
-      boundaryNote.textContent = "Save, merge, delete, or add at least one rally window before re-running.";
+      boundaryNote.textContent = "Save, merge, delete, or add at least one rally clip before analyzing saved clips.";
     }
     return;
   }
@@ -1762,7 +1762,7 @@ async function rerunWithSavedBoundaries() {
   const manualSegments = buildManualSegmentsFromRallies();
   if (!manualSegments.length) {
     if (boundaryNote) {
-      boundaryNote.textContent = "No valid rally windows are available to re-run.";
+      boundaryNote.textContent = "No valid rally clips are available to analyze.";
     }
     return;
   }
@@ -1864,9 +1864,9 @@ function renderProfileCard(label, profile) {
     <p class="intelligence-value">${escapeHtml(formatMetricValue(profile?.winner_rate, "pct"))}</p>
     <div class="profile-grid">
       <span>Pressure ${escapeHtml(formatMetricValue(profile?.pressure_index, "pct"))}</span>
-      <span>T ${escapeHtml(formatMetricValue(profile?.avg_t_occupancy, "pct"))}</span>
+      <span>T control ${escapeHtml(formatMetricValue(profile?.avg_t_occupancy, "pct"))}</span>
       <span>Coverage ${escapeHtml(formatMetricValue(profile?.avg_court_coverage, "pct"))}</span>
-      <span>Late ${escapeHtml(formatMetricValue(profile?.late_retrievals, "count"))}</span>
+      <span>Late retrieves ${escapeHtml(formatMetricValue(profile?.late_retrievals, "count"))}</span>
       <span>Top shot ${escapeHtml(topMixLabel(profile?.shot_mix))}</span>
       <span>Top side ${escapeHtml(topMixLabel(profile?.side_mix))}</span>
     </div>
@@ -1894,12 +1894,12 @@ function renderIntelligence(diagnostics) {
   const outcomeCard = document.createElement("article");
   outcomeCard.className = "intelligence-card outcome-card";
   outcomeCard.innerHTML = `
-    <p class="intelligence-label">Resolved Outcomes</p>
+    <p class="intelligence-label">Rallies With Winners</p>
     <p class="intelligence-value">${escapeHtml(String((outcome.A_wins || 0) + (outcome.B_wins || 0)))}</p>
     <div class="profile-grid">
       <span>${escapeHtml(playerNames.A)} wins ${escapeHtml(String(outcome.A_wins || 0))}</span>
       <span>${escapeHtml(playerNames.B)} wins ${escapeHtml(String(outcome.B_wins || 0))}</span>
-      <span>Unknown ${escapeHtml(String(outcome.unknown || 0))}</span>
+      <span>Needs review ${escapeHtml(String(outcome.unknown || 0))}</span>
     </div>
   `;
   intelligenceCards.appendChild(outcomeCard);
@@ -1916,7 +1916,7 @@ function renderIntelligence(diagnostics) {
     )
     .join("");
   phaseCard.innerHTML = `
-    <p class="intelligence-label">Phase Drift</p>
+    <p class="intelligence-label">Match Phases</p>
     <p class="intelligence-value">${escapeHtml(String(Object.keys(phase).length || 0))}</p>
     <div class="profile-grid">${phaseRows || "<span>n/a</span>"}</div>
   `;
@@ -1936,7 +1936,7 @@ function renderIntelligence(diagnostics) {
       card.className = "mini-card sequence-card";
       card.innerHTML = `
         <p class="mini-card-title">${escapeHtml(sequence.sequence || "Sequence")}</p>
-        <p class="mini-card-body">${escapeHtml(String(sequence.count || 0))} occurrences | ${escapeHtml(formatMetricValue(sequence.rally_rate, "pct"))} rally rate</p>
+        <p class="mini-card-body">${escapeHtml(String(sequence.count || 0))} times | ${escapeHtml(formatMetricValue(sequence.rally_rate, "pct"))} of rallies</p>
       `;
       sequenceList.appendChild(card);
     }
@@ -1946,7 +1946,7 @@ function renderIntelligence(diagnostics) {
   if (!risks.length) {
     const empty = document.createElement("article");
     empty.className = "mini-card empty";
-    empty.textContent = "No high-confidence risk flags from the current heuristics.";
+    empty.textContent = "No clear warning signs found yet.";
     riskList.appendChild(empty);
   } else {
     for (const risk of risks.slice(0, 6)) {
@@ -2129,8 +2129,8 @@ function motionPreviewSvg(segmentation) {
   return `
     <div class="motion-preview-card">
       <div class="motion-preview-head">
-        <strong>Motion Preview</strong>
-        <span>${escapeHtml(String(preview.length))} sampled points</span>
+        <strong>Rally Finder Preview</strong>
+        <span>${escapeHtml(String(preview.length))} moments checked</span>
       </div>
       <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Motion preview">
         <rect x="0" y="0" width="${width}" height="${height}" fill="transparent" />
@@ -2145,8 +2145,8 @@ function motionPreviewSvg(segmentation) {
           width - margin.right
         }" y2="${thresholdY.toFixed(2)}" stroke="rgba(249,110,42,0.58)" stroke-dasharray="5 5" />
         <polyline points="${linePoints}" fill="none" stroke="#0f6f9d" stroke-width="2.4" />
-        <text x="${margin.left}" y="13" font-size="11" fill="#4a616e">motion</text>
-        <text x="${width - margin.right}" y="13" text-anchor="end" font-size="11" fill="#914419">threshold</text>
+        <text x="${margin.left}" y="13" font-size="11" fill="#4a616e">activity</text>
+        <text x="${width - margin.right}" y="13" text-anchor="end" font-size="11" fill="#914419">rally line</text>
         <text x="${margin.left}" y="${height - 5}" font-size="10" fill="#4a616e">${fmt(
           minTime,
           1
@@ -2180,7 +2180,7 @@ function renderDiagnostics(diagnostics) {
   const motion = segmentation.motion || {};
   const cards = [
     {
-      label: "Analyzed Window",
+      label: "Video Portion",
       value: `${diagnosticValue(segmentation.window_start_sec, 1)}s -> ${diagnosticValue(
         segmentation.window_end_sec,
         1
@@ -2188,44 +2188,44 @@ function renderDiagnostics(diagnostics) {
       detail: `${diagnosticValue(segmentation.window_duration_sec, 1)}s total`,
     },
     {
-      label: "Final Rallies",
+      label: "Rally Clips",
       value: diagnosticValue(segmentation.final_segment_count, 0),
-      detail: `${diagnosticValue(segmentation.base_segment_count, 0)} base candidates`,
+      detail: `${diagnosticValue(segmentation.base_segment_count, 0)} first-pass clips`,
     },
     {
-      label: "Threshold",
+      label: "Sensitivity",
       value: diagnosticValue(segmentation.selected_threshold, 4),
-      detail: segmentation.adaptive_used ? "adaptive threshold used" : "base threshold used",
+      detail: segmentation.adaptive_used ? "adjusted for this video" : "default setting used",
     },
     {
-      label: "Signal",
+      label: "Rally Activity",
       value: diagnosticValue(segmentation.segment_signal || segmentation.mode || "auto"),
-      detail: `${diagnosticValue(segmentation.smoothing_window_sec, 2)}s smoothing`,
+      detail: `smoothed over ${diagnosticValue(segmentation.smoothing_window_sec, 2)}s`,
     },
     {
-      label: "Bridge",
+      label: "Joined Clips",
       value: `${diagnosticValue(segmentation.pre_bridge_segment_count, 0)} -> ${diagnosticValue(
         segmentation.bridged_segment_count,
         0
       )}`,
-      detail: `${diagnosticValue(segmentation.bridge_gap_sec, 1)}s max bridge gap`,
+      detail: `joined short gaps up to ${diagnosticValue(segmentation.bridge_gap_sec, 1)}s`,
     },
     {
-      label: "Motion Samples",
+      label: "Moments Checked",
       value: diagnosticValue(motion.sample_count, 0),
-      detail: `${fmtPct(motion.active_sample_rate || 0)} active`,
+      detail: `${fmtPct(motion.active_sample_rate || 0)} looked rally-like`,
     },
     {
-      label: "Frame Step",
+      label: "Review Detail",
       value: diagnosticValue(segmentation.frame_step, 0),
-      detail: "higher is faster, lower is denser",
+      detail: "higher is faster, lower is closer review",
     },
     {
-      label: "Fallback",
+      label: "Safety Net",
       value: segmentation.fallback_full_window_used ? "Used" : "No",
       detail: segmentation.fallback_full_window_used
-        ? "no confident breaks found"
-        : "boundaries came from motion",
+        ? "kept the full selected portion"
+        : "clips found from activity",
     },
   ];
 
@@ -2251,7 +2251,7 @@ function renderDiagnostics(diagnostics) {
     ? segmentation.final_segments.slice(0, 40)
     : [];
   if (!finalSegments.length) {
-    segmentPreview.textContent = "No final segment candidates were emitted.";
+    segmentPreview.textContent = "No rally clips were found.";
     return;
   }
 
@@ -2274,7 +2274,7 @@ function renderRallies(rallies, options = {}) {
     const message =
       typeof options.emptyMessage === "string" && options.emptyMessage.trim()
         ? options.emptyMessage.trim()
-        : "No rally segments were detected from this video.";
+        : "No rallies were detected from this video.";
     empty.textContent = message;
     empty.className = "rally-empty";
     rallyList.appendChild(empty);
@@ -2319,16 +2319,16 @@ function renderRallies(rallies, options = {}) {
     const tags = [
       `${fmt(rally.duration_sec, 1)}s`,
       `${rallyShotsCount(rally)} shots`,
-      `${playerNames.A} T ${formatMetricValue(rally.positions?.A_T_occupancy, "pct")}`,
-      `${playerNames.B} T ${formatMetricValue(rally.positions?.B_T_occupancy, "pct")}`,
-      `${playerNames.A} cov ${formatMetricValue(rally.positions?.A_court_coverage, "pct")}`,
-      `${playerNames.B} cov ${formatMetricValue(rally.positions?.B_court_coverage, "pct")}`,
+      `${playerNames.A} T control ${formatMetricValue(rally.positions?.A_T_occupancy, "pct")}`,
+      `${playerNames.B} T control ${formatMetricValue(rally.positions?.B_T_occupancy, "pct")}`,
+      `${playerNames.A} coverage ${formatMetricValue(rally.positions?.A_court_coverage, "pct")}`,
+      `${playerNames.B} coverage ${formatMetricValue(rally.positions?.B_court_coverage, "pct")}`,
     ];
     if (hasSavedCorrection) {
-      tags.unshift("saved bounds");
+      tags.unshift("saved clip times");
     }
     if (isDeleted) {
-      tags.unshift("deleted on re-run");
+      tags.unshift("will remove");
     }
     for (const tagText of tags) {
       const tag = document.createElement("span");
@@ -2355,13 +2355,13 @@ function renderInsight(insight) {
 
   insightPanel.classList.remove("hidden");
   const confidence = insight.confidence || "n/a";
-  insightModel.textContent = `${insight.model || "model-unknown"} | confidence: ${confidence}`;
+  insightModel.textContent = `Coaching read: ${confidence}`;
 
   clearChildren(insightSummaryCards);
   const summaryCards = [
-    { label: "Confidence", value: confidence },
-    { label: "Pattern Count", value: String((insight.key_patterns || []).length) },
-    { label: "Drill Count", value: String((insight.drills || []).length) },
+    { label: "Read Strength", value: confidence },
+    { label: "Patterns", value: String((insight.key_patterns || []).length) },
+    { label: "Drills", value: String((insight.drills || []).length) },
   ];
   for (const card of summaryCards) {
     const el = document.createElement("div");

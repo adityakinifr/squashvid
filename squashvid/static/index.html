@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="stylesheet" href="/static/css/app.css?v=flowfit-2" />
   </head>
   <body>
     <div class="bg-grid" aria-hidden="true"></div>
@@ -24,43 +24,53 @@
       </a>
       <div class="topbar-links">
         <a href="#results">Dashboard</a>
-        <a href="#intelligence-panel">Intelligence</a>
+        <a href="#intelligence-panel">Insights</a>
         <a href="#review-panel">Rally Review</a>
       </div>
       <span class="system-pill">
         <span class="live-dot" aria-hidden="true"></span>
-        CV pipeline ready
+        Ready to analyze
       </span>
     </nav>
 
     <main class="layout">
       <header class="hero reveal" style="--stagger: 0">
         <div class="hero-copy">
-          <p class="badge">CV + LLM Match Intel</p>
+          <p class="badge">Match coaching studio</p>
           <h1>Squash video, translated into coaching decisions.</h1>
           <p class="subtitle">
-            Analyze YouTube matches or local clips into rally windows, movement patterns,
+            Analyze YouTube matches or local clips into rally clips, movement patterns,
             tactical pressure, and review-ready coaching actions.
           </p>
           <div class="hero-actions">
             <a class="hero-link primary-link" href="#analyze-form">Start analysis</a>
-            <a class="hero-link" href="#intelligence-panel">View intelligence model</a>
+            <a class="hero-link" href="#intelligence-panel">Preview insights</a>
           </div>
         </div>
-        <div class="hero-board" aria-label="Analysis workflow">
-          <div class="hero-stat main">
-            <span class="hero-stat-label">Pipeline</span>
-            <strong>Rally → Track → Coach</strong>
-            <small>Segmentation, movement map, tactical flags, review pack</small>
+        <div class="hero-board hero-visual" aria-label="Analysis workflow">
+          <picture>
+            <source srcset="/static/img/flow-hero-v1.webp?v=1" type="image/webp" />
+            <img src="/static/img/flow-hero-v1.png?v=1" alt="" aria-hidden="true" />
+          </picture>
+          <div class="hero-visual-shade" aria-hidden="true"></div>
+          <div class="flow-card">
+            <span>Match Flow</span>
+            <strong>Rally clips become coachable moments.</strong>
           </div>
-          <div class="hero-stat">
-            <span class="hero-stat-label">Output</span>
-            <strong>Cards + exports</strong>
-          </div>
-          <div class="hero-stat">
-            <span class="hero-stat-label">Review</span>
-            <strong>Clip windows</strong>
-          </div>
+          <ol class="flow-steps" aria-label="Analysis workflow steps">
+            <li>
+              <span class="flow-step-icon" aria-hidden="true">1</span>
+              <span>Clip rallies</span>
+            </li>
+            <li>
+              <span class="flow-step-icon" aria-hidden="true">2</span>
+              <span>Find patterns</span>
+            </li>
+            <li>
+              <span class="flow-step-icon" aria-hidden="true">3</span>
+              <span>Plan the fix</span>
+            </li>
+          </ol>
         </div>
       </header>
 
@@ -71,7 +81,7 @@
               <p class="eyebrow">Source setup</p>
               <h2>Analyze a match</h2>
             </div>
-            <p>Keep defaults for a fast first pass. Tune CV thresholds only when segmentation needs correction.</p>
+            <p>Add a YouTube link or local clip. Defaults are tuned for a fast first pass; only open more settings if rally clips look off.</p>
           </div>
 
           <div class="mode-row" role="radiogroup" aria-label="Video source type">
@@ -81,7 +91,7 @@
             </label>
             <label class="mode-pill">
               <input type="radio" name="source_mode" value="path" />
-              <span>Local Path</span>
+              <span>Local File</span>
             </label>
             <label class="mode-pill">
               <input type="radio" name="source_mode" value="upload" />
@@ -91,7 +101,7 @@
 
           <div class="source-card">
             <div id="path-group" class="field-group">
-              <label for="source-input">Video Path or URL</label>
+              <label for="source-input">Video Link or File</label>
               <input
                 id="source-input"
                 name="source_input"
@@ -110,13 +120,8 @@
           <div class="settings-grid">
             <label class="toggle">
               <input id="include-llm" name="include_llm" type="checkbox" checked />
-              <span>Include LLM Coaching Layer</span>
+              <span>Generate coaching insights</span>
             </label>
-
-            <div class="field-group compact">
-              <label for="llm-model">LLM Model</label>
-              <input id="llm-model" name="llm_model" type="text" value="gpt-4.1-mini" />
-            </div>
 
             <div class="field-group compact">
               <label for="player-a-name">Player A Name</label>
@@ -129,76 +134,79 @@
             </div>
 
             <div class="field-group compact">
-              <label for="openai-api-key">OpenAI API Key (optional)</label>
-              <input
-                id="openai-api-key"
-                name="openai_api_key"
-                type="password"
-                autocomplete="off"
-                placeholder="sk-..."
-              />
-            </div>
-
-            <div class="field-group compact">
-              <label for="max-rallies">Max Rallies (optional)</label>
+              <label for="max-rallies">Rallies to Review (optional)</label>
               <input id="max-rallies" name="max_rallies" type="number" min="1" value="24" />
             </div>
 
-            <div class="field-group compact">
-              <label for="youtube-cache">YouTube Cache Dir (optional)</label>
-              <input id="youtube-cache" name="youtube_cache_dir" type="text" placeholder="/tmp/squashvid_cache" />
-            </div>
           </div>
 
           <details class="advanced">
             <summary>
-              <span>Advanced CV controls</span>
-              <small>thresholds, workers, calibration</small>
+              <span>More settings</span>
+              <small>Optional tuning for unusual videos</small>
             </summary>
             <div class="settings-grid advanced-grid">
               <div class="field-group compact">
-                <label for="motion-threshold">Motion Threshold</label>
+                <label for="llm-model">Insight Engine</label>
+                <input id="llm-model" name="llm_model" type="text" value="gpt-4.1-mini" />
+              </div>
+              <div class="field-group compact">
+                <label for="openai-api-key">Coaching Key (optional)</label>
+                <input
+                  id="openai-api-key"
+                  name="openai_api_key"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="Paste key if needed"
+                />
+              </div>
+              <div class="field-group compact">
+                <label for="youtube-cache">Saved Downloads Folder</label>
+                <input id="youtube-cache" name="youtube_cache_dir" type="text" placeholder="/tmp/squashvid_cache" />
+              </div>
+              <div class="field-group compact">
+                <label for="motion-threshold">Rally Finder Sensitivity</label>
                 <input id="motion-threshold" type="number" step="0.001" value="0.018" />
               </div>
               <div class="field-group compact">
-                <label for="min-rally-sec">Min Rally Seconds</label>
+                <label for="min-rally-sec">Shortest Rally Seconds</label>
                 <input id="min-rally-sec" type="number" step="0.1" value="4.0" />
               </div>
               <div class="field-group compact">
-                <label for="idle-gap-sec">Idle Gap Seconds</label>
+                <label for="idle-gap-sec">Pause Between Rallies</label>
                 <input id="idle-gap-sec" type="number" step="0.1" value="1.2" />
               </div>
               <div class="field-group compact">
-                <label for="segment-frame-step">Segment Frame Step</label>
+                <label for="segment-frame-step">Rally Finder Detail</label>
                 <input id="segment-frame-step" type="number" min="1" max="12" step="1" value="2" />
               </div>
               <div class="field-group compact">
-                <label for="tracking-frame-step">Tracking Frame Step</label>
+                <label for="tracking-frame-step">Movement Detail</label>
                 <input id="tracking-frame-step" type="number" min="1" max="12" step="1" value="4" />
               </div>
               <div class="field-group compact">
-                <label for="cv-workers">CV Worker Processes (optional)</label>
-                <input id="cv-workers" type="number" min="1" max="128" step="1" placeholder="auto = all cores" />
+                <label for="cv-workers">Processing Power (optional)</label>
+                <input id="cv-workers" type="number" min="1" max="128" step="1" placeholder="auto" />
               </div>
               <div class="field-group compact">
                 <label for="analysis-start-minute">Start At Minute</label>
                 <input id="analysis-start-minute" type="number" min="0" max="240" step="0.1" value="0" />
               </div>
               <div class="field-group compact">
-                <label for="max-video-minutes">Analyze Duration Minutes (optional)</label>
+                <label for="max-video-minutes">Minutes to Analyze (optional)</label>
                 <input id="max-video-minutes" type="number" min="0.1" max="240" step="0.1" placeholder="full video" />
               </div>
             </div>
             <p class="advanced-help">
-              Optional court calibration uses normalized full-frame coordinates. Leave every field blank for automatic T/court estimation.
+              If court detection looks wrong, enter the court area manually. Leave every field blank for automatic setup.
             </p>
             <div class="settings-grid advanced-grid calibration-grid">
               <div class="field-group compact">
-                <label for="court-left">Court Left</label>
+                <label for="court-left">Court Left Edge</label>
                 <input id="court-left" type="number" min="0" max="1" step="0.001" placeholder="0.000" />
               </div>
               <div class="field-group compact">
-                <label for="court-top">Court Top</label>
+                <label for="court-top">Court Top Edge</label>
                 <input id="court-top" type="number" min="0" max="1" step="0.001" placeholder="0.000" />
               </div>
               <div class="field-group compact">
@@ -210,11 +218,11 @@
                 <input id="court-height" type="number" min="0.01" max="1" step="0.001" placeholder="1.000" />
               </div>
               <div class="field-group compact">
-                <label for="court-t-x">T X (frame)</label>
+                <label for="court-t-x">T Position Horizontal</label>
                 <input id="court-t-x" type="number" min="0" max="1" step="0.001" placeholder="0.500" />
               </div>
               <div class="field-group compact">
-                <label for="court-t-y">T Y (frame)</label>
+                <label for="court-t-y">T Position Vertical</label>
                 <input id="court-t-y" type="number" min="0" max="1" step="0.001" placeholder="0.620" />
               </div>
             </div>
@@ -230,7 +238,7 @@
       <section id="results" class="results hidden" aria-live="polite">
         <nav class="results-nav" aria-label="Dashboard sections">
           <a href="#results">Snapshot</a>
-          <a href="#intelligence-panel">Intelligence</a>
+          <a href="#intelligence-panel">Insights</a>
           <a href="#review-panel">Review</a>
           <a href="#insight-panel">Coaching</a>
         </nav>
@@ -270,17 +278,17 @@
 
         <article id="intelligence-panel" class="panel intelligence reveal hidden" style="--stagger: 5">
           <div class="panel-head">
-            <h2>Match Intelligence</h2>
-            <p>Outcome model, repeated sequences, risk flags, and review priorities</p>
+            <h2>Match Insights</h2>
+            <p>Patterns, pressure moments, and coach review priorities</p>
           </div>
           <div id="intelligence-cards" class="intelligence-cards"></div>
           <div class="intelligence-columns">
             <div>
-              <h3>Repeated Sequences</h3>
+              <h3>Repeated Patterns</h3>
               <div id="sequence-list" class="mini-card-list"></div>
             </div>
             <div>
-              <h3>Risk Flags</h3>
+              <h3>Warning Signs</h3>
               <div id="risk-list" class="mini-card-list"></div>
             </div>
           </div>
@@ -288,12 +296,12 @@
             <div class="review-pack-head">
               <div>
                 <h3>Coach Review Pack</h3>
-                <p>High-leverage rallies selected for multimodal or manual coach review</p>
+                <p>High-leverage rallies selected for closer coach review</p>
               </div>
               <div class="export-actions">
-                <button id="export-analysis-btn" type="button" class="secondary">Export JSON</button>
-                <button id="export-report-btn" type="button" class="secondary">Export Report</button>
-                <button id="export-review-pack-btn" type="button" class="secondary">Export Review Pack</button>
+                <button id="export-analysis-btn" type="button" class="secondary">Download Results</button>
+                <button id="export-report-btn" type="button" class="secondary">Download Report</button>
+                <button id="export-review-pack-btn" type="button" class="secondary">Download Clip List</button>
               </div>
             </div>
             <div id="review-pack-list" class="review-pack-list"></div>
@@ -301,12 +309,14 @@
         </article>
 
         <article id="diagnostics-panel" class="panel diagnostics reveal hidden" style="--stagger: 6">
-          <div class="panel-head">
-            <h2>Segmentation Diagnostics</h2>
-            <p>How the rally boundaries were chosen</p>
-          </div>
-          <div id="diagnostics-cards" class="diagnostics-cards"></div>
-          <div id="segment-preview" class="segment-preview"></div>
+          <details class="diagnostics-details">
+            <summary>
+              <span>Rally Clip Check</span>
+              <small>Open only if the rally clips look off</small>
+            </summary>
+            <div id="diagnostics-cards" class="diagnostics-cards"></div>
+            <div id="segment-preview" class="segment-preview"></div>
+          </details>
         </article>
 
         <article class="panel rallies reveal" style="--stagger: 7">
@@ -376,25 +386,25 @@
             </div>
             <div class="boundary-editor" aria-label="Preview rally boundary edits">
               <div class="field-group compact">
-                <label for="boundary-start">Preview Start (s)</label>
+                <label for="boundary-start">Clip Start (s)</label>
                 <input id="boundary-start" type="number" min="0" step="0.1" />
               </div>
               <div class="field-group compact">
-                <label for="boundary-end">Preview End (s)</label>
+                <label for="boundary-end">Clip End (s)</label>
                 <input id="boundary-end" type="number" min="0" step="0.1" />
               </div>
               <div class="boundary-actions">
                 <button id="boundary-apply" type="button" class="secondary">Preview</button>
-                <button id="boundary-save" type="button" class="secondary">Save Bounds</button>
+                <button id="boundary-save" type="button" class="secondary">Save Clip Times</button>
                 <button id="boundary-merge-next" type="button" class="secondary">Merge Next</button>
                 <button id="boundary-delete" type="button" class="secondary">Delete Rally</button>
-                <button id="boundary-add" type="button" class="secondary">Add Window</button>
-                <button id="boundary-rerun" type="button" class="secondary">Re-run Saved</button>
-                <button id="boundary-reset" type="button" class="secondary">Reset Preview</button>
-                <button id="boundary-clear" type="button" class="secondary">Clear Active</button>
+                <button id="boundary-add" type="button" class="secondary">Add Rally Clip</button>
+                <button id="boundary-rerun" type="button" class="secondary">Analyze Saved Clips</button>
+                <button id="boundary-reset" type="button" class="secondary">Reset Clip</button>
+                <button id="boundary-clear" type="button" class="secondary">Clear This Edit</button>
                 <button id="boundary-clear-all" type="button" class="secondary">Clear All</button>
               </div>
-              <p id="boundary-note">Save, merge, delete, or add rally windows, then re-run to recompute shots and coaching output.</p>
+              <p id="boundary-note">Adjust rally clips, then analyze saved clips to refresh shots and coaching.</p>
             </div>
             <div class="review-stage">
               <canvas id="review-canvas" width="960" height="540"></canvas>
@@ -439,7 +449,7 @@
 
         <article class="panel raw reveal" style="--stagger: 9">
           <details>
-            <summary>Raw JSON</summary>
+            <summary>Troubleshooting Details</summary>
             <pre id="raw-json"></pre>
           </details>
         </article>
