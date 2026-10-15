@@ -54,6 +54,7 @@ async function loadClip(stem) {
   for (const p of ['A', 'B']) {
     const P = D[p];
     P.pos = D[`${p}_pos`]; P.box = D[`${p}_box`]; P.kp = D[`${p}_kp`]; P.ks = D[`${p}_ks`]; P.status = D[`${p}_status`];
+    P.body = D[`${p}_body`]; P.bconf = D[`${p}_bconf`];  // 3D joints (H36M-17, court metres) and confidence; absent without bodies.parquet
   }
   D.t = D.t || new Float64Array(0);
   D.rallies = (meta.rallies || []).map((r, i) => ({ ...r, id: i, label: r.rally ?? i + 1 }));

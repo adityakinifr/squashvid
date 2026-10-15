@@ -7,3 +7,7 @@ d3.min.js          d3 7.9.0 (d3@7.9.0/dist/d3.min.js)                        ISC
 r128 is the last three.js line with a classic-script build and a global OrbitControls, which keeps the app free of
 a bundler and of import maps (Chrome and Safari both load it). d3 is ISC-licensed (permissive, MIT-equivalent
 terms), not MIT or BSD as often assumed; the licence text is kept alongside.
+
+GLTFLoader.js     three.js r128 (examples/js/loaders/GLTFLoader.js)         MIT   same licence
+models/Xbot.glb   three.js r128 examples/models/gltf/Xbot.glb: a Mixamo-rigged humanoid used for the 3D figures
+                  (personal, non-commercial use; check Mixamo's terms before redistributing). view3d.js loads both on demand.

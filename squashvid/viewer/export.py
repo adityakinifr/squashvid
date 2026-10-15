@@ -175,6 +175,24 @@ def players_arrays(df: pd.DataFrame, n: int) -> dict[str, np.ndarray]:
     return out
 
 
+def bodies_arrays(df: pd.DataFrame | None, n: int) -> dict[str, np.ndarray]:
+    """From bodies.parquet: `<p>_body` (n,17,3) int16 mm court joints (H36M order) and `<p>_bconf` (n,) u8 confidence."""
+    out: dict[str, np.ndarray] = {}
+    if df is None or not len(df):
+        return out
+    for p in PLAYERS:
+        sub = df[(df.player == p) & (df.frame >= 0) & (df.frame < n)].drop_duplicates("frame", keep="last")
+        body = np.full((n, 17, 3), np.nan)
+        conf = np.zeros(n, np.uint8)
+        if len(sub):
+            idx = sub.frame.to_numpy(int)
+            body[idx] = np.stack(sub["joints"].to_numpy()).reshape(-1, 17, 3)
+            conf[idx] = np.clip(np.round(sub["conf"].to_numpy(float) * 255), 0, 255)
+        out[f"{p}_body"] = quantise(body, 1000)
+        out[f"{p}_bconf"] = conf
+    return out
+
+
 def load_ball(work: Path, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
     """(uv (n,2) px, state (n,) u8, score (n,) f32, source name): ball_track.parquet, else the best raw detector output."""
     uv = np.full((n, 2), np.nan)
@@ -333,6 +351,11 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
         for name, a in players_arrays(players_df, n).items():
             out.put(name, a, scale={"pos": 1000, "box": 8, "kp": 8, "ks": 255, "conf": 255}.get(name.split("_")[1], 1))
     sources["players"] = players_df is not None and len(players_df) > 0
+
+    bodies = bodies_arrays(_read(work / "bodies.parquet"), n)  # optional: the viewer falls back to keypoint lifts
+    for name, a in bodies.items():
+        out.put(name, a, scale=1000 if name.endswith("_body") else 255)
+    sources["bodies"] = bool(bodies)
 
     uv, state, score, ball_src = load_ball(work, n)
     out.put("ball_uv", quantise(uv, 8), 8)
