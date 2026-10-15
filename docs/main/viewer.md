@@ -23,7 +23,8 @@ Proxy: frames come from `Video(sdr=True)` (the project's HLG to SDR conversion),
 - **Front wall**: tin, service and out lines, front-wall impacts with ellipses, coloured by player or rally, for the current rally or the whole clip.
 - **Timeline**: rally bands, event ticks (analysis hits in player colours, audio onsets faint), ball coverage and player presence strips; click or drag to seek. Clicking an impact or bounce in the top or front view seeks to it.
 - **Side panel**: Stats and Insights render whatever `analysis/stats.json` and `insights.json` contain (per-player objects become comparison tables; evidence timestamps become clickable chips), Events lists every event, Report shows `report.md`.
-- **Names**: the Names button saves A/B names to `work/viewer_settings.json` through the server.
+- **Links**: `?t=<seconds>` seeks and `?tab=stats|insights|events|report` opens a side tab, e.g. `http://127.0.0.1:8771/?t=166&tab=report#IMG_4091`.
+- **Names**: the Names button saves A/B names to `work/viewer_settings.json` through the server. The viewer uses them at once; the written report picks them up the next time `python -I -m squashvid.analysis` runs (then re-export).
 
 Keys: space play/pause, left/right one frame (pauses first), shift+arrow 5 s, `[` / `]` previous/next rally. The `<video>` element is the clock (`requestVideoFrameCallback`, falling back to `requestAnimationFrame`); media time maps to a frame by binary search on the exported per-frame `t`.
 

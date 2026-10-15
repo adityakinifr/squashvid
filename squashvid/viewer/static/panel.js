@@ -186,13 +186,22 @@ const Panel = (() => {
   }
 
   function mdToHtml(md) {
-    let out = '', list = false;
+    let out = '', list = false, table = 0;
+    const cells = ln => ln.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
     for (const ln of esc(md).split('\n')) {
-      const li = /^\s*[-*]\s+(.*)/.exec(ln), hd = /^(#{1,4})\s+(.*)/.exec(ln);
+      const li = /^\s*[-*]\s+(.*)/.exec(ln), hd = /^(#{1,4})\s+(.*)/.exec(ln), tr = /^\s*\|/.test(ln);
+      if (table && !tr) { out += '</tbody></table>'; table = 0; }
+      if (tr) {
+        if (/^\s*\|[\s|:-]+\|\s*$/.test(ln)) continue;  // the header separator row
+        if (!table) { out += `<table class="kv"><thead><tr>${cells(ln).map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>`; table = 1; continue; }
+        out += `<tr>${cells(ln).map(c => `<td>${c}</td>`).join('')}</tr>`;
+        continue;
+      }
       if (li) { if (!list) { out += '<ul>'; list = true; } out += `<li>${li[1]}</li>`; continue; }
       if (list) { out += '</ul>'; list = false; }
       if (hd) out += `<h4>${hd[2]}</h4>`; else if (ln.trim()) out += `<p>${ln}</p>`;
     }
+    if (table) out += '</tbody></table>';
     if (list) out += '</ul>';
     return out.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\b(\d{1,2}):(\d\d)(?:\.\d+)?\b/g, (m, a, b) => `<span class="chip" data-t="${+a * 60 + +b}">${m}</span>`);
   }

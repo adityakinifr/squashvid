@@ -10,13 +10,13 @@ from squashvid.analysis.io import PLAYERS, WORK
 
 
 def names() -> dict[str, str]:
-    """Player names from work/settings.json ({"players": {"A": "Name", "B": "Name"}}) when it exists."""
-    f = WORK / "settings.json"
+    """Player names saved by the viewer's Names button (work/viewer_settings.json, {"names": {"A": ..., "B": ...}})."""
     out = {"A": "Player A", "B": "Player B"}
     try:
-        out.update({k: v for k, v in json.load(open(f)).get("players", {}).items() if k in out and isinstance(v, str) and v.strip()})
+        saved = json.loads((WORK / "viewer_settings.json").read_text()).get("names", {})
     except (OSError, ValueError):
-        pass
+        return out
+    out.update({k: v.strip() for k, v in saved.items() if k in out and isinstance(v, str) and v.strip()})
     return out
 
 

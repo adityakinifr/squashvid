@@ -60,6 +60,18 @@ PLAY_WEIGHTS = np.array([0.79, 1.31, 1.08, 0.31, -0.76])
 PLAY_BIAS = -0.77
 BALL_WEIGHT = 1.0  # added per unit of ball presence above its median when the ball detector has run (unvalidated)
 ENTER_P, LEAVE_P = 0.55, 0.40
+# A break in the shot chain only ends a rally when play also looks paused during the gap: in continuous play a
+# couple of missed shots leave a gap of 3-5 s while the play score stays high (IMG_4090 at 295 s, checked by eye).
+SPLIT_P = 0.7
+ALWAYS_SPLIT_S = 6.0
+# After a rally ends the players walk, pick up the ball and bounce it before the serve, which pass as shots and
+# carry the rally on. Trailing shots where both players move at walking pace (mean speed within TRIM_WINDOW_S)
+# are dropped. Fitted on the census clips: shots outside a census rally have the faster player at a median
+# 1.2 m/s (max 1.5 on clip 1) and the slower at 0.6, against 2.0 and 1.0 inside. Only the tail is trimmed:
+# both players stand still for the serve.
+TRIM_FAST_MPS = 1.5
+TRIM_SLOW_MPS = 0.8
+TRIM_WINDOW_S = 1.0
 
 
 def _roll(a: np.ndarray, k: int) -> np.ndarray:
@@ -115,6 +127,35 @@ def _intervals(p: np.ndarray, enter: float = ENTER_P, leave: float = LEAVE_P) ->
     return out
 
 
+def _chain_breaks(p: np.ndarray, t0: float, t1: float, chain_gap: float = CHAIN_GAP_S, split_p: float = SPLIT_P, always: float = ALWAYS_SPLIT_S) -> bool:
+    """Whether the gap between two consecutive shots at t0 and t1 (s) ends a rally, given the per-second play score p."""
+    gap = t1 - t0
+    if gap <= chain_gap:
+        return False
+    if gap > always:
+        return True
+    inside = p[int(np.ceil(t0)) : int(np.floor(t1)) + 1]
+    return bool(len(inside) == 0 or inside.min() < split_p)
+
+
+def walking_pace(m: Match, t: float, window: float = TRIM_WINDOW_S) -> bool:
+    """Whether both players move at walking pace around time t (s)."""
+    a, b = m.frame_at(t - window), m.frame_at(t + window)
+    sp = np.vstack([m.tracks[k].speed[a : b + 1] for k in PLAYERS])
+    if not np.isfinite(sp).any(axis=1).all():
+        return False
+    fast, slow = np.nanmean(np.nanmax(sp, axis=0)), np.nanmean(np.nanmin(sp, axis=0))
+    return bool(fast < TRIM_FAST_MPS and slow < TRIM_SLOW_MPS)
+
+
+def trim_tail(m: Match, chunk: np.ndarray, ht: np.ndarray) -> np.ndarray:
+    """Drop the chain's trailing shots that happen at walking pace."""
+    end = len(chunk)
+    while end > 0 and walking_pace(m, float(ht[chunk[end - 1]])):
+        end -= 1
+    return chunk[:end]
+
+
 def segment(m: Match, hits: pd.DataFrame, swings: pd.DataFrame, chain_gap: float = CHAIN_GAP_S, min_shots: int = MIN_SHOTS) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Rallies, the hits with rally id and shot index (shots outside any rally drop out), and the evidence table.
 
@@ -132,9 +173,10 @@ def segment(m: Match, hits: pd.DataFrame, swings: pd.DataFrame, chain_gap: float
         sel = np.flatnonzero((ht >= a - 1.0) & (ht <= b + 1.0))
         if len(sel) < min_shots:
             continue
-        # Split the stretch wherever the shot chain breaks.
-        br = np.flatnonzero(np.diff(ht[sel]) > chain_gap) + 1
+        # Split the stretch wherever the shot chain breaks and play pauses in the gap.
+        br = [i + 1 for i in range(len(sel) - 1) if _chain_breaks(p, ht[sel[i]], ht[sel[i + 1]], chain_gap)]
         for chunk in np.split(sel, br):
+            chunk = trim_tail(m, chunk, ht)
             g = h.iloc[chunk]
             if len(g) < min_shots:
                 continue

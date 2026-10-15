@@ -107,6 +107,7 @@
     await openClip($('clip').value);
     const q = new URLSearchParams(location.search);
     if (q.has('t')) V.seekTo(parseFloat(q.get('t')));
+    if (q.has('tab')) [...document.querySelectorAll('#tabs button')].find(x => x.dataset.tab === q.get('tab'))?.click();
   })();
   window.V = V; window.__viewer = { renderFrame, stepFrame };
 })();
