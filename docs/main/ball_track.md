@@ -18,6 +18,10 @@ casting the camera ray. sigma_a and sigma_b are the principal axes of the positi
 Racket events carry the nearest player (A/B) and the pixel distance to that player's wrist; deciding
 who really hit the ball is left to the analysis stage.
 
+The viewer draws a ball on nearly every rally frame from these three files: `squashvid/viewer/ballpath.py` bridges
+tracking gaps with curves that keep each side's velocity, keeps a corner at every impact, and puts filled 3D frames on
+that frame's camera ray (see [viewer.md](viewer.md)). The path is for drawing only; no statistic uses it.
+
 ## How it works
 
 1. **Linking** (`link.py`). Blobs within 4 px are merged; blobs that sit still (a spot that does not

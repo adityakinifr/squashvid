@@ -250,7 +250,7 @@ const View3D = (() => {
     // Without WebGL only this pane is lost; the video, 2D views and stats keep working.
     console.warn('3D view disabled:', err);
     hud.textContent = '3D view needs WebGL, which this browser has turned off.';
-    return { buildCourt() {}, update() {}, preset() {} };
+    return { buildCourt() {}, update() {}, ball() {}, preset() {} };
   }
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   host.appendChild(renderer.domElement);
@@ -291,18 +291,29 @@ const View3D = (() => {
     players[p] = { g, body, skel, sg, fig, disc };
   }
   // Ball: solid sphere when 3D known, else a floor ring + the camera ray ("height unknown").
-  const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffd54a }));
+  const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffd54a, transparent: true }));
+  // The ball's shadow straight below it on the floor, fainter the higher the ball: it is what makes the height readable.
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false }));
   const ghost = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.16, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
   const rayGeo = new THREE.BufferGeometry(); rayGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
   const rayLine = new THREE.Line(rayGeo, new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.45 }));
   rayLine.frustumCulled = false;
-  const TRAIL = 24;
+  const TRAIL = 128, TRAIL_S = 0.8;  // points held; seconds of path behind the ball
+  // The trail is a tube that tapers from the ball's size to nothing (WebGL lines are one pixel wide): SIDES vertices
+  // around each path point, rebuilt in place each draw.
+  const SIDES = 6, BALL_R = 0.07;
   const trailGeo = new THREE.BufferGeometry();
-  trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL * 3), 3));
-  trailGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL * 3), 3));
-  const trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({ vertexColors: true }));
+  trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAIL * SIDES * 3), 3));
+  trailGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(TRAIL * SIDES * 3), 3));
+  const tubeIdx = [];
+  for (let i = 0; i < TRAIL - 1; i++) for (let j = 0; j < SIDES; j++) {
+    const a = i * SIDES + j, b = i * SIDES + (j + 1) % SIDES, c = a + SIDES, d = b + SIDES;
+    tubeIdx.push(a, c, b, b, c, d);
+  }
+  trailGeo.setIndex(tubeIdx);
+  const trail = new THREE.Mesh(trailGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
   trail.frustumCulled = false;
-  dyn.add(ballMesh, ghost, rayLine, trail);
+  dyn.add(ballMesh, shadow, ghost, rayLine, trail);
   const impacts = [];
   for (let i = 0; i < 8; i++) {
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff5d5d, transparent: true }));
@@ -385,7 +396,43 @@ const View3D = (() => {
       o.body.visible = have && !skel && !solid;
       // body is stylised: face the camera plane is irrelevant for a cylinder.
     }
-    // ball
+    if (!D.ball_path_xyz) legacyBall(D, f, cam);  // with a ball path, ball(ft) draws it, between frames too
+    // recent wall/floor impacts
+    const t = D.t[f]; let k = 0;
+    for (const e of D.bounces) {
+      if (e.t > t || e.t < t - 1.5 || !Number.isFinite(e.x) || !Number.isFinite(e.z) || !Number.isFinite(e.y)) continue;
+      if (k >= impacts.length) break;
+      const m = impacts[k++]; m.visible = true; m.position.set(e.x, e.y, e.z);
+      m.material.opacity = 1 - (t - e.t) / 1.5;
+    }
+    for (; k < impacts.length; k++) impacts[k].visible = false;
+    dirty = true;
+  }
+
+  const _t = new THREE.Vector3(), _n = new THREE.Vector3(), _b = new THREE.Vector3(), _X = new THREE.Vector3(1, 0, 0);
+  function setTrail(pts, color) {
+    const tp = trailGeo.attributes.position.array, tc = trailGeo.attributes.color.array, n = Math.min(pts.length, TRAIL);
+    const P = pts.slice(pts.length - n);
+    for (let i = 0; i < n; i++) {
+      const a = n > 1 ? i / (n - 1) : 1, r = BALL_R * 0.9 * a, col = color(a);
+      const p = P[Math.min(n - 1, i + 1)], q = P[Math.max(0, i - 1)];
+      _t.set(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+      if (_t.lengthSq() < 1e-12) _t.set(0, 1, 0);
+      _t.normalize();
+      _n.crossVectors(_t, Math.abs(_t.z) > 0.9 ? _X : UP).normalize(); _b.crossVectors(_t, _n);
+      for (let j = 0; j < SIDES; j++) {
+        const th = (j / SIDES) * Math.PI * 2, c = Math.cos(th) * r, s = Math.sin(th) * r, o = (i * SIDES + j) * 3;
+        tp[o] = P[i][0] + c * _n.x + s * _b.x; tp[o + 1] = P[i][1] + c * _n.y + s * _b.y; tp[o + 2] = P[i][2] + c * _n.z + s * _b.z;
+        tc[o] = col[0]; tc[o + 1] = col[1]; tc[o + 2] = col[2];
+      }
+    }
+    trailGeo.setDrawRange(0, Math.max(0, n - 1) * SIDES * 6);
+    trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.color.needsUpdate = true;
+  }
+
+  // Without a ball path: the fitted 3D point, else the floor projection of the camera ray.
+  function legacyBall(D, f, cam) {
+    shadow.visible = false; ballMesh.material.opacity = 1;
     const known = D.ball_xyz && Number.isFinite(D.ball_xyz[3 * f]);
     const uvOk = D.ball_uv && Number.isFinite(D.ball_uv[2 * f]);
     ballMesh.visible = !!known; ghost.visible = false; rayLine.visible = false;
@@ -402,27 +449,27 @@ const View3D = (() => {
       mode = 'ball: ESTIMATED (floor projection of the camera ray, height unknown)';
     } else if (uvOk) mode = 'ball seen, no 3D position';
     // trail from whichever source is present
-    const tp = trailGeo.attributes.position.array, tc = trailGeo.attributes.color.array;
-    let n = 0;
-    for (let g = Math.max(0, f - TRAIL + 1); g <= f; g++) {
-      let q = null;
-      if (D.ball_xyz && Number.isFinite(D.ball_xyz[3 * g])) q = [D.ball_xyz[3 * g], D.ball_xyz[3 * g + 1], D.ball_xyz[3 * g + 2]];
-            if (!q) continue;
-      const a = (g - (f - TRAIL + 1)) / TRAIL;
-      tp.set(q, n * 3); tc.set([0.15 + 0.85 * a, 0.14 + 0.72 * a, 0.05 + 0.2 * a], n * 3); n++;
-    }
-    trailGeo.setDrawRange(0, n);
-    trailGeo.attributes.position.needsUpdate = true; trailGeo.attributes.color.needsUpdate = true;
-    // recent wall/floor impacts
-    const t = D.t[f]; let k = 0;
-    for (const e of D.bounces) {
-      if (e.t > t || e.t < t - 1.5 || !Number.isFinite(e.x) || !Number.isFinite(e.z) || !Number.isFinite(e.y)) continue;
-      if (k >= impacts.length) break;
-      const m = impacts[k++]; m.visible = true; m.position.set(e.x, e.y, e.z);
-      m.material.opacity = 1 - (t - e.t) / 1.5;
-    }
-    for (; k < impacts.length; k++) impacts[k].visible = false;
+    const pts = [];
+    for (let g = Math.max(0, f - 23); g <= f; g++) if (D.ball_xyz && Number.isFinite(D.ball_xyz[3 * g])) pts.push([D.ball_xyz[3 * g], D.ball_xyz[3 * g + 1], D.ball_xyz[3 * g + 2]]);
+    setTrail(pts, a => [0.15 + 0.85 * a, 0.14 + 0.72 * a, 0.05 + 0.2 * a]);
     hud.textContent = mode;
+  }
+
+  // The ball on the 3D path at fractional frame ft, with its shadow and the path over the last TRAIL_S behind it.
+  function ball(ft) {
+    const D = V.D; if (!D || !D.ball_path_xyz) return;
+    const tr = ballTrail(D, ft, TRAIL_S, true), b = tr[tr.length - 1];
+    ghost.visible = false; rayLine.visible = false;
+    ballMesh.visible = shadow.visible = !!b;
+    if (b) {
+      ballMesh.position.set(b.p[0], b.p[1], b.p[2]);
+      ballMesh.material.opacity = b.k === 2 ? 0.75 : 1;
+      shadow.position.set(b.p[0], b.p[1], 0.012);
+      shadow.material.opacity = 0.45 * Math.max(0.3, 1 - b.p[2] / 5);
+    }
+    setTrail(tr.map(q => q.p), a => [0.55 + 0.45 * a, 0.45 + 0.4 * a, 0.1 + 0.2 * a]);
+    const uvOk = D.ball_uv && Number.isFinite(D.ball_uv[2 * Math.floor(ft)]);
+    hud.textContent = b ? (b.k === 2 ? 'ball: 3D, filled between fitted points' : 'ball: 3D') : uvOk ? 'ball seen, no 3D position' : 'no ball';
     dirty = true;
   }
 
@@ -434,7 +481,7 @@ const View3D = (() => {
   new ResizeObserver(resize).observe(host);
   (function loop() { if (dirty) { renderer.setClearColor(getComputedStyle(document.body).backgroundColor); renderer.render(scene, camera); dirty = false; } requestAnimationFrame(loop); })();
   // look(pos, target) and figureKinds() serve screenshot tooling: aim the camera, and say whether each player is drawn by the rig.
-  return { buildCourt, update, preset, dirtyFlag() { dirty = true; },
+  return { buildCourt, update, ball, preset, dirtyFlag() { dirty = true; },
     look(pos, target) { camera.position.set(...pos); controls.target.set(...target); controls.update(); dirty = true; },
     figureKinds() { return ['A', 'B'].map(p => players[p].fig.rig ? 'rig' : 'capsule'); } };
 })();

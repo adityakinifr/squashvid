@@ -23,9 +23,25 @@ function scopedEvents(D, kinds, t, scope) {
   return sel.filter(e => Math.abs(e.t - t) < 4);
 }
 
+// The ball and its path over the last BALL_TRAIL_S in a 2D view: pt maps a court point [x, y, z] to view coordinates.
+// Drawn at a fractional frame, so it moves between video frames.
+const BALL_TRAIL_S = 0.8;
+function makeBall(parent, r) {
+  const trail = parent.append('polyline').attr('fill', 'none').attr('stroke', '#ffd54a').attr('stroke-width', r * 0.6).attr('stroke-opacity', 0.55)
+    .attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round');
+  const dot = parent.append('circle').attr('r', r).attr('fill', '#ffd54a').attr('stroke', '#3a2f00').attr('stroke-width', r * 0.3);
+  return (D, ft, pt) => {
+    const tr = D.ball_path_xyz ? ballTrail(D, ft, BALL_TRAIL_S, true) : [];
+    const b = tr[tr.length - 1];
+    trail.attr('points', tr.map(q => pt(q.p).join(',')).join(' '));
+    dot.style('display', b ? null : 'none');
+    if (b) { const [x, y] = pt(b.p); dot.attr('cx', x).attr('cy', y).attr('fill-opacity', b.k === 2 ? 0.6 : 1); }
+  };
+}
+
 const TopView = (() => {
   const svg = d3.select('#top');
-  let g = null, heatG, evG, plG, trails, dots, key = '', W = 6.4, L = 9.75;
+  let g = null, heatG, evG, plG, trails, dots, drawBall = null, key = '', W = 6.4, L = 9.75;
   const X = x => x, Y = y => L - y;
 
   function build(D) {
@@ -53,6 +69,7 @@ const TopView = (() => {
       dots[p].append('circle').attr('r', 0.28).attr('fill', V.COLORS[p]).attr('fill-opacity', 0.85).attr('stroke', '#fff').attr('stroke-width', 0.04);
       dots[p].append('text').attr('font-size', 0.3).attr('text-anchor', 'middle').attr('y', 0.42).style('fill', V.COLORS[p]);
     }
+    drawBall = makeBall(g.append('g'), 0.1);
     key = '';
   }
 
@@ -108,12 +125,14 @@ const TopView = (() => {
       trails[p].attr('points', pts.join(' '));
     }
   }
-  return { update, rebuild() { g = null; key = ''; } };
+  // Seen from above, the ball is drawn on the floor under it.
+  const ball = ft => { if (g && V.D && g.datum() === V.D) drawBall(V.D, ft, q => [X(q[0]), Y(q[1])]); };
+  return { update, ball, rebuild() { g = null; key = ''; } };
 })();
 
 const FrontView = (() => {
   const svg = d3.select('#front');
-  let g = null, evG, W = 6.4, H = 5, key = '';
+  let g = null, evG, drawBall = null, W = 6.4, H = 5, key = '';
   const Y = z => H - z;
 
   function build(D) {
@@ -132,6 +151,7 @@ const FrontView = (() => {
     g.append('text').attr('x', 0).attr('y', Y(0) + 0.35).attr('font-size', 0.26).text('left wall');
     g.append('text').attr('x', W).attr('y', Y(0) + 0.35).attr('font-size', 0.26).attr('text-anchor', 'end').text('right wall');
     evG = g.append('g');
+    drawBall = makeBall(g.append('g'), 0.08);
     key = '';
   }
 
@@ -154,5 +174,7 @@ const FrontView = (() => {
     }
     evG.selectAll('ellipse').attr('fill-opacity', d => d.t > t ? 0.12 : 0.4).attr('stroke-width', d => Math.abs(d.t - t) < 0.5 ? 0.14 : 0.05);
   }
-  return { update, rebuild() { g = null; key = ''; } };
+  // Seen from behind, across and up: the ball's height over the court, wherever it is along the court.
+  const ball = ft => { if (g && V.D && g.datum() === V.D) drawBall(V.D, ft, q => [q[0], Y(q[2])]); };
+  return { update, ball, rebuild() { g = null; key = ''; } };
 })();

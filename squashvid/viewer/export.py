@@ -380,6 +380,17 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
         out.put("ball_anchored", anchored)
 
     rallies, rallies_src = load_rallies(work)
+    if ball_src:
+        from squashvid.viewer import ballpath
+
+        # A ball on every frame of a rally, smooth through the gaps, for the drawn ball and its trail.
+        for name, a in ballpath.build(work, ts, rallies, uv, cam, venue).items():
+            if name.endswith("_uv"):
+                out.put(name, quantise(a, 8), 8)
+            elif name.endswith("_xyz"):
+                out.put(name, quantise(a, 1000), 1000)
+            else:
+                out.put(name, a)
     events = load_events(work, ts)
     sources["rallies"] = rallies_src
     sources["events"] = _read(work / "ball_events.parquet") is not None

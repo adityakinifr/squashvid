@@ -15,7 +15,19 @@
     if (f === lastDrawn && !force) return;
     lastDrawn = f; V.frame = f;
     Overlay.draw(f); View3D.update(f); TopView.update(f); FrontView.update(f); Timeline.draw(f); Panel.update(f);
+    drawBalls(ballFrame(f));
   }
+
+  // The ball in the 3D, top and front views moves between video frames: while playing, at display rate, by how far
+  // the clock is between one frame and the next (smooth at slow speeds too). Paused, it sits on the frame. The video
+  // overlay always stays on the shown frame.
+  function ballFrame(f) {
+    if (!V.D || video.paused || video.seeking) return f;
+    const ts = V.D.t, t = video.currentTime, g = frameOfTime(ts, t);
+    return g + 1 < ts.length ? g + Math.min(1, Math.max(0, (t - ts[g]) / (ts[g + 1] - ts[g]))) : g;
+  }
+  function drawBalls(ft) { View3D.ball(ft); TopView.ball(ft); FrontView.ball(ft); }
+  (function tick() { if (V.D && !video.paused && !video.seeking) drawBalls(ballFrame(V.frame)); requestAnimationFrame(tick); })();
   const redraw = () => { readOpts(); renderFrame(V.frame, true); };
 
   // Media time -> frame, via the exported per-frame t array (binary search; VFR safe).

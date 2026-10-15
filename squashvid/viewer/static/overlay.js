@@ -61,8 +61,36 @@ const Overlay = (() => {
     }
   }
 
+  // A ring on the ball and a comet tail along its path over the last TRAIL_S, widening and brightening toward the
+  // ball; stretches filled between tracked points are fainter and the ring dashed. Drawn on the shown frame only, so
+  // it stays on the picture.
+  const TRAIL_S = 0.5;
+  function ring(u, v, k, color, dashed, z = 1) {
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, 2.5 * k * z);
+    if (dashed) ctx.setLineDash([4 * k * z, 3 * k * z]);
+    ctx.beginPath(); ctx.arc(u * k, v * k, 9 * k * z, 0, 6.3); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(u * k, v * k, 1.8 * k * z, 0, 6.3); ctx.fill();
+  }
+
   function drawBall(f, k) {
     const D = V.D;
+    if (D.ball_path_uv) {
+      const z = Math.max(k, 0.6 * (window.devicePixelRatio || 1)) / k;  // sizes hold up when the video is drawn small
+      const tr = ballTrail(D, f, TRAIL_S, false);
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (let i = 1; i < tr.length; i++) {
+        const a = i / (tr.length - 1), filled = tr[i].k === 2 || tr[i - 1].k === 2;
+        ctx.strokeStyle = `rgba(255,213,74,${((0.08 + 0.72 * a * a) * (filled ? 0.55 : 1)).toFixed(3)})`;
+        ctx.lineWidth = (1.2 + 5 * a) * k * z;
+        ctx.beginPath(); ctx.moveTo(tr[i - 1].p[0] * k, tr[i - 1].p[1] * k); ctx.lineTo(tr[i].p[0] * k, tr[i].p[1] * k); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+      if (!tr.length) return;
+      const [u, v] = tr[tr.length - 1].p, st = D.ball_state ? D.ball_state[f] : 0;
+      if (tr[tr.length - 1].k === 2) ring(u, v, k, 'rgba(255,240,190,0.85)', true, z);
+      else ring(u, v, k, st === 2 ? '#ff9f43' : st === 3 ? '#ffffff' : '#ffd54a', st === 3, z);
+      return;
+    }
     if (!D.ball_uv) return;
     const TRAIL = 12;
     // trail: connect consecutive known points, fading with age
@@ -80,12 +108,7 @@ const Overlay = (() => {
     }
     const u = D.ball_uv[2 * f], v = D.ball_uv[2 * f + 1], st = D.ball_state[f];
     if (!Number.isFinite(u)) return;
-    const r = 9 * k;
-    ctx.lineWidth = Math.max(2, 2.5 * k);
-    if (st === 1) { ctx.strokeStyle = '#ffd54a'; ctx.beginPath(); ctx.arc(u * k, v * k, r, 0, 6.3); ctx.stroke(); }
-    else if (st === 2) { ctx.strokeStyle = '#ff9f43'; ctx.beginPath(); ctx.arc(u * k, v * k, r, 0, 6.3); ctx.stroke(); }
-    else { ctx.strokeStyle = '#ffffff'; ctx.setLineDash([4 * k, 3 * k]); ctx.beginPath(); ctx.arc(u * k, v * k, r, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
-    ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(u * k, v * k, 1.8 * k, 0, 6.3); ctx.fill();
+    ring(u, v, k, st === 1 ? '#ffd54a' : st === 2 ? '#ff9f43' : '#ffffff', st !== 1 && st !== 2);
   }
 
   function draw(f) {
@@ -97,7 +120,8 @@ const Overlay = (() => {
     for (const p of ['A', 'B']) drawPlayer(p, f, k);
     if (V.opts.ball) drawBall(f, k);
     const hud = document.getElementById('video-hud');
-    const st = V.D.ball_state ? ['no ball', 'ball: detected', 'ball: linked', 'ball: interpolated'][V.D.ball_state[f]] : 'no ball data';
+    let st = V.D.ball_state ? ['no ball', 'ball: detected', 'ball: linked', 'ball: interpolated'][V.D.ball_state[f]] : 'no ball data';
+    if (V.D.ball_path_kind && V.D.ball_path_kind[f] === 2) st = 'ball: filled between tracked points';
     hud.textContent = `frame ${f}  ${st}`;
   }
 

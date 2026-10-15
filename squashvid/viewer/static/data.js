@@ -140,4 +140,35 @@ function rallyAt(D, t) {
   return null;
 }
 
+// ---- ball path (export: ball_path_uv px / ball_path_xyz m; kind 1 measured, 2 filled between measured points) ----
+function ballArrays(D, three) {
+  return three ? [D.ball_path_xyz, D.ball_path_kind3, 3] : [D.ball_path_uv, D.ball_path_kind, 2];
+}
+
+// The ball at fractional frame ft: straight between the frames either side when both have a position (they are a
+// frame apart on a smooth path), else the earlier frame's. null without a position.
+function ballAt(D, ft, three) {
+  const [a, kind, d] = ballArrays(D, three);
+  if (!a) return null;
+  const f = Math.max(0, Math.min(D.n - 1, Math.floor(ft))), s = ft - f;
+  if (!Number.isFinite(a[d * f])) return null;
+  const p = Array.from(a.subarray(d * f, d * f + d));
+  if (s > 0 && f + 1 < D.n && Number.isFinite(a[d * f + d])) for (let i = 0; i < d; i++) p[i] += s * (a[d * f + d + i] - p[i]);
+  return { p, k: kind[f] };
+}
+
+// The path over the `secs` before fractional frame ft, oldest first and ending at the ball at ft; it stops at the
+// first frame without a position, so a trail never jumps a gap.
+function ballTrail(D, ft, secs, three) {
+  const [a, kind, d] = ballArrays(D, three);
+  const head = ballAt(D, ft, three);
+  if (!head) return [];
+  const out = [head], f = Math.min(D.n - 1, Math.floor(ft)), t0 = D.t[f];
+  for (let g = f === ft ? f - 1 : f; g >= 0 && t0 - D.t[g] <= secs; g--) {
+    if (!Number.isFinite(a[d * g])) break;
+    out.push({ p: Array.from(a.subarray(d * g, d * g + d)), k: kind[g] });
+  }
+  return out.reverse();
+}
+
 function onFrame(fn) { V.listeners.push(fn); }
