@@ -62,6 +62,7 @@ class Match:
     audio_rallies: pd.DataFrame
     ball_events: pd.DataFrame | None = None
     ball_detections: pd.DataFrame | None = None
+    bodies: pd.DataFrame | None = None  # 3D figures (t, player, state, joints) when squashvid.bodies has run
     extra: dict = field(default_factory=dict)
 
     @property
@@ -160,6 +161,11 @@ def load_ball_detections(stem: str) -> pd.DataFrame | None:
         return None
 
 
+def load_bodies(stem: str) -> pd.DataFrame | None:
+    f = work_dir(stem) / "bodies.parquet"
+    return pd.read_parquet(f, columns=["t", "player", "state", "joints"]) if f.exists() else None
+
+
 def load(stem: str, use_ball: bool = True) -> Match:
     from squashvid.ball.regions import venue
 
@@ -176,4 +182,5 @@ def load(stem: str, use_ball: bool = True) -> Match:
         audio_rallies=pd.read_parquet(wd / "audio_rallies.parquet"),
         ball_events=load_ball_events(stem) if use_ball else None,
         ball_detections=load_ball_detections(stem),
+        bodies=load_bodies(stem),
     )

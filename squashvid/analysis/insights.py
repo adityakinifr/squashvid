@@ -20,6 +20,9 @@ Players appear in text as {A} and {B} (see `tok`); coach.fill puts in the saved 
 
 Who won a rally is inferred from who served the next one (squashvid.analysis.serves), never
 from the ball alone. Rallies without an inferred winner are left out of those candidates.
+
+How low a player got at the strike comes from the 3D figures (squashvid.analysis.posture); hits
+without a figure are left out of that candidate.
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ import pandas as pd
 
 from squashvid.analysis.hits import RECOVERY_RADIUS_M, T_RADIUS_M
 from squashvid.analysis.io import PLAYERS, Match, other
+from squashvid.analysis.posture import UPRIGHT
 from squashvid.analysis.stats import dist_from_T_by_rally
 
 MIN_RALLIES = 8
@@ -212,6 +216,7 @@ METRICS = {
     "off_T_cost": {"unit": "%", "better": "lower", "what": "how often your next shot is rushed when you are far from the T as your opponent hits", "dec": 0, "scale": 100, "min_effect": 0.1},
     "won_on_T": {"unit": "%", "better": "higher", "what": "how often you win the rallies in which you hold the T more than your opponent, against the others", "dec": 0, "scale": 100, "min_effect": 0.1},
     "last_shot_error": {"unit": "%", "better": "lower", "what": "how often a rally that ends on your shot goes to your opponent", "dec": 0, "scale": 100, "min_effect": 0.1},
+    "upright_at_back": {"unit": "%", "better": "lower", "what": "how often you hit from the back of the court standing almost upright", "dec": 0, "scale": 100, "min_effect": 0.1},
 }
 FAR_FROM_T_M = 2.0  # "far from the T" at the opponent's strike, for off_T_cost
 RUSHED = ("defence", "pressure")  # hits.SITUATION_RULES classes with under about 1.1 s, or stretched
@@ -401,6 +406,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         cands.extend(_winner_candidates(facts, h))
     if facts.ball is not None and len(facts.ball):
         cands.extend(_ball_candidates(facts))
+    if "hip_drop" in h and h.hip_drop.notna().any():
+        cands.extend(_posture_candidates(h))
 
     return finalise(cands, with_suppressed)
 
@@ -528,6 +535,32 @@ def _winner_candidates(facts: Facts, h: pd.DataFrame) -> list[dict]:
         c["allows"] = ["won_lost"]
         rows = less[~less.win].assign(t=lambda y: y.start_t + 1.5)
         c["evidence"] = _windows(rows, label_fn=lambda r, p=p, o=o: f"rally {rally_no(r.rally)}: {tok(o)} held the T more, then served the next rally")
+        c["suppressed"] = suppress(c)
+        out.append(c)
+    return out
+
+
+def _posture_candidates(h: pd.DataFrame) -> list[dict]:
+    """How often each player hit from behind the service boxes standing almost upright, against the opponent.
+    Behind the boxes nearly every shot is played off a low bounce, so straight legs there are worth a coach's look;
+    in mid-court a volley is rightly hit upright. Each rally's first shot is left out: serves are hit standing,
+    and the most upright "hits" were mostly serves or hits given to the wrong player."""
+    back = h[h.cell_hit_from.fillna("").str.startswith("back") & (h.shot_index > 1) & h.hip_drop.notna()]
+    back = back.assign(upright=back.hip_drop < UPRIGHT)
+
+    def share(d, q):
+        x = d[d.hitter == q].upright
+        return float(x.mean()) if len(x) else np.nan
+
+    out = []
+    for p in PLAYERS:
+        o = other(p)
+        res = cluster_bootstrap(_by_rally(back), lambda d, p=p, o=o: share(d, p) - share(d, o))
+        mine = back[back.hitter == p]
+        c = _candidate(p, "vs_opponent", "upright_at_back", "vs opponent", share(back, p), share(back, o), res, len(mine), res["n_rallies"], extra={"upright_pct": f"{UPRIGHT * 100:g}"}, n_label="shots from the back")
+        # The surest hits first; upright ones for something to try, bent-knee ones (short of a scramble) for a strength.
+        rows = mine[mine.upright] if not c["favourable"] else mine[mine.hip_drop.between(0.15, 0.45)]
+        c["evidence"] = _windows(rows.sort_values("confidence", ascending=False), label_fn=lambda r, p=p: f"rally {rally_no(r.rally)}: {tok(p)} hit from the back with the hips {r.hip_drop * 100:.0f}% below standing height")
         c["suppressed"] = suppress(c)
         out.append(c)
     return out

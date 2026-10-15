@@ -11,6 +11,7 @@ from squashvid.analysis import hits as H
 from squashvid.analysis import rallies as R
 from squashvid.analysis import stats as S
 from squashvid.analysis.io import PLAYERS, Match, load, out_dir
+from squashvid.analysis.posture import hip_drop
 from squashvid.analysis.serves import add_servers
 
 log = logging.getLogger("squashvid.analysis")
@@ -24,6 +25,7 @@ def detect(m: Match) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     raw = H.detect_hits(m)
     rallies, hits, ev = R.segment(m, raw, swings)
     hits = H.add_context(hits, m)
+    hits["hip_drop"] = hip_drop(m.bodies, hits)
     return add_servers(m, rallies, hits), hits, ev
 
 

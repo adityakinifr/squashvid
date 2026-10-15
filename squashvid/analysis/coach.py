@@ -8,7 +8,8 @@ watch with what to look for in them, and one drill. Every sentence with a number
 on and passes the insights verifier; the headlines, cues and drills are fixed coaching text with no numbers.
 
 Findings that rest on who won each rally (inferred from who served next) may say won and lost, and carry a caveat
-in their detail; for position, what holding the T was worth in rallies won is one of the reasons.
+in their detail; for position, what holding the T was worth in rallies won is one of the reasons. Findings from the
+3D figures (how low a player got at the strike) carry their own caveat: the figures are estimated from one camera.
 
 Text names players as {A} and {B}; fill() swaps in the saved names when a report or the viewer shows it.
 """
@@ -28,12 +29,13 @@ THEMES = {
     "length": ("Length", 0.9),
     "errors": ("Fewer mistakes at the end of rallies", 0.85),
     "pressure": ("Taking time away from the opponent", 0.8),
+    "posture": ("Getting down to the ball", 0.7),
     "stamina": ("Keeping it up to the end", 0.6),
 }
 THEME_OF = {
     "t_at_strike": "position", "t_overall": "position", "t_share": "position", "recovered": "position",
     "recover_from_back": "position", "off_T_cost": "position", "time_given": "pressure", "deep_bounce": "length",
-    "won_on_T": "position", "last_shot_error": "errors",
+    "won_on_T": "position", "last_shot_error": "errors", "upright_at_back": "posture",
 }
 # Plays about one situation rather than a whole match; a narrow thing to try may sit beside a broad one to keep.
 NARROW = {"recover_from_back", "short_time"}
@@ -95,6 +97,12 @@ PLAYBOOK = {
         "look": "{p}'s last shot of the rally: where {p} was, and whether a safer shot was on",
         "drill": "Safe-shot games: play first to 7, where a ball into the tin or out costs two points and a straight drive past the service box is always allowed. Then play the same game where short shots are allowed only from in front of the short line.",
     },
+    "upright_at_back": {
+        "try": "On shots from the back, bend your knees and get down to the ball rather than hitting standing up.",
+        "keep": "You bend your knees and get down to the ball in the back of the court.",
+        "look": "how far {p} bends the knees when hitting from the back of the court",
+        "drill": "Low drives: a partner feeds to a back corner; play straight drives with your front knee bent over your front foot and hold that low finish for a count of one. 3 sets of 10 each side.",
+    },
     "early_late:t_at_strike": {
         "try": "Keep getting back to the T in the last rallies, not just the first ones.",
         "keep": "You keep getting back to the T right to the end.",
@@ -122,12 +130,15 @@ WHY = {
     "short_time": "After a rushed shot (under {split} s), {p} got back near the T {v}% of the time, against {c}% after shots with more time.",
     "last_shot_error": "Of the {n_own} rallies that ended on {p}'s shot, {o} won {lost_own} ({v}%); of the {o_n_own} that ended on {o}'s shot, {p} won {o_lost_own} ({c}%).",
     "won_on_T": "{p} won {won_more} of the {n_more} rallies in which {p} spent more time near the T than {o}, and {won_less} of the other {n_less}.",
+    "upright_at_back": "On {v}% of {p}'s shots from the back of the court, {p} was almost upright, hips less than {upright_pct}% below standing height; for {o} it was {c}%.",
     "early_late:t_at_strike": "In the later rallies {p} was on average {v} m from the T when {o} hit, against {c} m in the earlier ones.",
     "early_late:recovered": "In the later rallies {p} was back near the T before the next shot {v}% of the time, against {c}% in the earlier ones.",
 }
 UNIT_GAP = {"%": " percentage points", "m": " m", "s": " s"}
 # Said once in the detail of any item that rests on the inferred rally winners.
 WINNER_CAVEAT = "Who won each rally is inferred from who served the next one; a let, or a last shot the tracking missed, can put a rally on the wrong side."
+# Said once in the detail of any item built on the 3D figures.
+POSE_CAVEAT = "This comes from body poses estimated from one camera behind the glass; watch the clips before changing anything."  # no digits: "3D" would fail the verifier
 
 
 def theme(c: dict) -> str:
@@ -212,7 +223,7 @@ def item(c: dict, kind: str, cands: list[dict]) -> dict:
         if worth is not None:
             reasons.append(why(worth))
             cites.append(worth["id"])
-    rests_on_winners = any(x.get("allows") for x in [c, *support, *(x for x in cands if x["id"] in cites)])
+    rests_on_winners = any("won_lost" in x.get("allows", ()) for x in [c, *support, *(x for x in cands if x["id"] in cites)])
     return {
         "theme": theme(c),
         "title": THEMES[theme(c)][0],
@@ -222,7 +233,7 @@ def item(c: dict, kind: str, cands: list[dict]) -> dict:
         "why": reasons,
         "look_for": book["look"].format(**fmt),
         "drill": book["drill"] if kind == "try" else None,
-        "detail": [basis(c)] + [f"{why(x)} {basis(x)}" for x in support] + ([WINNER_CAVEAT] if rests_on_winners else []),
+        "detail": [basis(c)] + [f"{why(x)} {basis(x)}" for x in support] + ([WINNER_CAVEAT] if rests_on_winners else []) + ([POSE_CAVEAT] if theme(c) == "posture" else []),
         "evidence": evidence,
         "cites": cites + [x["id"] for x in support],
         "confidence": confidence(c),

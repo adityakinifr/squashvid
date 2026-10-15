@@ -46,6 +46,10 @@ Reading it: the figure follows the picture to about 4 % of the player's height, 
 
 A Mixamo-rigged humanoid (`vendor/models/Xbot.glb`, three.js example model, personal use) is loaded on demand with the vendored r128 `GLTFLoader`. Each frame the hips get the pelvis position and heading, three spine bones follow the hip and shoulder lines, the neck and head follow thorax to head top and the nose, and each limb bone is swung from its rest direction to the measured joint-to-joint direction (twist neutral). The rig is scaled from the measured leg and trunk lengths and lifted so its ankles stand at rest height. Vertex colours come from skin weights: shirt and upper sleeves in the player colour (`V.COLORS`), dark shorts, skin, white shoes. If the model cannot load, or until it has, a shaped capsule figure (tapered limbs, chest, belly and pelvis ellipsoids, neck, head, hands, shoes) with the same interface is used; the cylinder remains for frames without a 3D pose, and the old flat lift for clips without `bodies.parquet`. Lights: hemisphere, directional and a little ambient; the court and ball stay unlit. `?view=behind|side|top` selects the camera preset on load.
 
+## Used by the analysis
+
+`squashvid/analysis/posture.py` reads only the pelvis height at each hit (how low the hitter got, against their standing height) for one coaching finding; see `docs/main/analysis.md`. Height is the axis the camera sees best, so no other joint feeds the coaching.
+
 ## Known limits
 
 - Depth is the lifter's guess from a single camera behind the glass: a lunge toward the front wall is foreshortened, so lead-knee and hip depth are less reliable than the image-plane pose. 21 % of hit moments with a large foot gap still show the lead foot behind the hip.
