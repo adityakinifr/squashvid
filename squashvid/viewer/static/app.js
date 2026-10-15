@@ -106,6 +106,7 @@
     const { clips } = await (await fetch('/api/clips')).json();
     if (!clips.length) { $('status').textContent = 'no exported clips: run `python -I -m squashvid.viewer export --all`'; return; }
     $('clip').innerHTML = clips.map(c => `<option>${c.stem}</option>`).join('');
+    V.stems = clips.map(c => c.stem);
     const want = location.hash.slice(1);
     if (clips.some(c => c.stem === want)) $('clip').value = want;
     $('clip').addEventListener('change', () => openClip($('clip').value));
@@ -114,5 +115,6 @@
     if (q.has('t')) V.seekTo(parseFloat(q.get('t')));
     if (q.has('tab')) [...document.querySelectorAll('#tabs button')].find(x => x.dataset.tab === q.get('tab'))?.click();
   })();
+  V.openClip = stem => { $('clip').value = stem; return openClip(stem); };
   window.V = V; window.__viewer = { renderFrame, stepFrame };
 })();

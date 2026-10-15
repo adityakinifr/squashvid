@@ -78,6 +78,38 @@ def ball_table(stats: dict) -> list[str]:
     return out
 
 
+def outcomes_section(out: dict | None) -> list[str]:
+    """How rallies ended, from the winners inferred from who served next (serves.outcomes); empty without them."""
+    if not out or not out.get("n_decided"):
+        return []
+    P, k = out["players"], out["long_from_shots"]
+
+    def of(pair):
+        return f"{pair[0]} of {pair[1]}" if pair[1] else "n/a"
+
+    rows = [
+        (f"Rallies won (of {out['n_decided']} with a known winner)", lambda p: str(P[p]["won"])),
+        ("Won when serving", lambda p: of(P[p]["serving"])),
+        ("Won when receiving", lambda p: of(P[p]["receiving"])),
+        (f"Won in shorter rallies (under {k} shots)", lambda p: of(P[p]["short"])),
+        (f"Won in longer rallies ({k} shots or more)", lambda p: of(P[p]["long"])),
+        ("Rallies that ended on their shot, won", lambda p: of(P[p]["ended_on_own_shot"])),
+    ]
+    lines = [
+        "## How rallies ended (inferred)",
+        "",
+        "Nobody recorded the score, so who won each rally is inferred from the rule that the winner serves the next rally. "
+        f"{out['n_rallies'] - out['n_decided']} of {out['n_rallies']} rallies have no winner: the last rally of each clip, "
+        "and rallies after which the same player served again from the same side (a let, or a rally the tracking missed). "
+        "A rally that ended on a player's shot and went to the other player usually means that last shot was a mistake "
+        "(into the tin, out, or bouncing before the front wall), but it can also mean the tracking missed the other player's last shot.",
+        "",
+        "| | {A} | {B} |",
+        "|---|---|---|",
+    ]
+    return lines + [f"| {label} | {fn('A')} | {fn('B')} |" for label, fn in rows] + [""]
+
+
 def coaching(ins: dict, nm: dict[str, str], stem: str | None = None) -> list[str]:
     """The layered coaching: a short list per player first, then the evidence for a coach or parent.
 
@@ -130,6 +162,7 @@ def render(stem: str, stats: dict, ins: dict, title: str | None = None, nm: dict
         "",
         *[fill(x, nm) for x in stats_table(stats)],
         "",
+        *[fill(x, nm) for x in outcomes_section(ins.get("outcomes"))],
     ]
     if stats.get("ball") and all(p in stats["ball"] for p in PLAYERS):
         lines += [
@@ -158,7 +191,7 @@ def render_pooled(ins: dict, nm: dict[str, str] | None = None) -> str:
     nm = nm or names()
     stems = ins["clip"].split("+")
     head = ["# Match report: all clips together", "", f"{ins['n_rallies']} rallies across {len(stems)} clips ({', '.join(stems)}). The coaching below pools every rally; see each clip's report for its numbers.", ""]
-    return "\n".join(head + coaching(ins, nm))
+    return "\n".join(head + coaching(ins, nm) + [fill(x, nm) for x in outcomes_section(ins.get("outcomes"))])
 
 
 def clip_report(work: Path, stem: str, nm: dict[str, str] | None = None) -> str | None:
@@ -189,4 +222,4 @@ def rewrite_all(work: Path = WORK) -> list[Path]:
     return out
 
 
-__all__ = ["render", "render_pooled", "coaching", "clip_report", "rewrite_all", "names", "stats_table", "ball_table"]
+__all__ = ["render", "render_pooled", "coaching", "clip_report", "rewrite_all", "names", "stats_table", "ball_table", "outcomes_section"]

@@ -13,7 +13,7 @@ const Panel = (() => {
     return m ? m[1].toUpperCase() : null;
   }
   const label = k => { const p = playerKey(k); return p ? `<span class="p${p.toLowerCase()}">${esc(V.names[p])}</span>` : nice(k); };
-  const chip = (t, txt) => `<span class="chip" data-t="${t}">${txt || fmtTime(t)}</span>`;
+  const chip = (t, txt, clip) => `<span class="chip" data-t="${t}"${clip ? ` data-clip="${esc(clip)}"` : ''}>${clip ? esc(clip) + ' ' : ''}${txt || fmtTime(t)}</span>`;
 
   function renderObj(o, depth = 0) {
     if (Array.isArray(o)) {
@@ -129,16 +129,17 @@ const Panel = (() => {
     return h;
   }
 
+  // [t, label, clip] for each moment; another clip's moments are kept only when the pooled coaching is shown.
   function evidenceTimes(item) {
     const raw = item.evidence ?? item.timestamps ?? item.times ?? item.evidence_t ?? item.clips ?? item.examples ?? [];
     const arr = Array.isArray(raw) ? raw : [raw];
     const out = [];
     for (const e of arr) {
-      if (typeof e === 'number') out.push([e, null]);
+      if (typeof e === 'number') out.push([e, null, null]);
       else if (isObj(e)) {
-        if (e.clip && V.D && e.clip !== V.D.stem) continue;
+        if (e.clip && V.D && e.clip !== V.D.stem && scope !== 'pooled') continue;
         const t = e.t ?? e.time ?? e.t0 ?? e.start_t ?? e.t_start ?? e.timestamp ?? e.start;
-        if (typeof t === 'number') out.push([t, e.label ?? e.note ?? e.desc ?? null]);
+        if (typeof t === 'number') out.push([t, e.label ?? e.note ?? e.desc ?? null, e.clip && V.D && e.clip !== V.D.stem ? e.clip : null]);
       }
     }
     return out;
@@ -159,7 +160,7 @@ const Panel = (() => {
   // is folded away for a coach or parent.
   function coachCard(it) {
     const f = s => esc(nameText(s));
-    const watch = evidenceTimes(it).map(([t, l]) => `<div class="watch">${chip(t)} ${l ? f(l) : ''}</div>`).join('');
+    const watch = evidenceTimes(it).map(([t, l, clip]) => `<div class="watch">${chip(t, null, clip)} ${l ? f(l) : ''}</div>`).join('');
     const sure = it.confidence === 'clear' ? 'Clear.' : 'Likely, but the gap could be small.';
     return `<div class="card ${it.kind === 'try' ? 'bad' : 'good'}"><div class="theme">${esc(it.title)}</div><div class="h">${f(it.headline)}</div>`
       + it.why.map(w => `<div>${f(w)}</div>`).join('')
@@ -190,7 +191,26 @@ const Panel = (() => {
       return inner && isObj(x) ? `<h4>${label(k)}</h4>${inner}` : inner;
     }).join('');
   }
+  // Which coaching the Insights and Report tabs show: this clip's, or the one pooled over every clip (more rallies,
+  // so more findings hold up).
+  let scope = 'clip';
+  const pooled = { insights: undefined, report: {} };
+  function scopeBar() {
+    const b = (k, txt) => `<button data-scope="${k}" class="${scope === k ? 'on' : ''}">${txt}</button>`;
+    return `<div class="scope">${b('clip', 'This clip')}${b('pooled', 'All clips')}</div>`;
+  }
+  function pooledInsightsHtml() {
+    if (pooled.insights === undefined) {
+      pooled.insights = null;
+      fetch('/api/pooled/insights').then(r => r.ok ? r.json() : false).then(j => { pooled.insights = j; if (tab === 'insights') render(); }, () => { pooled.insights = false; });
+    }
+    if (!pooled.insights) return pooled.insights === false ? '<div class="empty">No pooled analysis yet: run <code>python -I -m squashvid.analysis --all --pooled</code>.</div>' : '<div class="note">Loading…</div>';
+    return `<div class="note">${pooled.insights.n_rallies} rallies from ${esc(pooled.insights.clip.split('+').join(', '))}. Moments in another clip open that clip.</div>` + coachHtml(pooled.insights.players);
+  }
   function insightsHtml(D) {
+    return scopeBar() + (scope === 'pooled' ? pooledInsightsHtml() : clipInsightsHtml(D));
+  }
+  function clipInsightsHtml(D) {
     const ins = D.meta.insights;
     if (!ins) return '<div class="empty">No analysis/insights.json yet. Strengths and improvements, each with clickable evidence timestamps, appear here when the analysis stage writes it.</div>';
     const note = isObj(ins) && typeof ins.note === 'string' ? `<div class="note">${esc(ins.note)}</div>` : '';
@@ -237,11 +257,28 @@ const Panel = (() => {
     if (table) out += '</tbody></table>';
     close();
     return out.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(\S(?:[^*\n]*\S)?)\*(?![*\w])/g, '$1<i>$2</i>')
-      .replace(/\b(\d{1,2}):(\d\d)(?:\.\d+)?\b/g, (m, a, b) => `<span class="chip" data-t="${+a * 60 + +b}">${m}</span>`);
+      .replace(clipTimeRx(), (m, clip, a, b) => `<span class="chip" data-t="${+a * 60 + +b}"${clip && clip !== V.D?.stem ? ` data-clip="${clip}"` : ''}>${m}</span>`);
+  }
+  // m:ss, optionally after a clip name (the pooled report writes "IMG_4091 0:20").
+  function clipTimeRx() {
+    const stems = (V.stems || []).map(x => x.replace(/[^\w-]/g, '')).filter(Boolean);
+    return new RegExp(`(?:\\b(${stems.length ? stems.join('|') : '(?!)'}) )?\\b(\\d{1,2}):(\\d\\d)(?:\\.\\d+)?\\b`, 'g');
   }
   // The server renders the report on request, so it carries the names saved since the analysis ran.
   const reportCache = {};
   function reportHtml(D) {
+    if (scope === 'pooled') {
+      const key = [V.names.A, V.names.B].join('|');
+      if (!(key in pooled.report)) {
+        pooled.report[key] = undefined;
+        fetch('/api/pooled/report').then(r => r.ok ? r.json() : null).then(j => { pooled.report[key] = j ? j.markdown : null; if (tab === 'report') render(); }, () => { pooled.report[key] = null; });
+      }
+      const md = pooled.report[key];
+      return scopeBar() + (md ? mdToHtml(md) : md === null ? '<div class="empty">No pooled analysis yet: run <code>python -I -m squashvid.analysis --all --pooled</code>.</div>' : '<div class="note">Loading…</div>');
+    }
+    return scopeBar() + clipReportHtml(D);
+  }
+  function clipReportHtml(D) {
     const key = [D.stem, V.names.A, V.names.B].join('|');
     const md = key in reportCache ? reportCache[key] ?? D.meta.report : D.meta.report;
     if (!(key in reportCache)) {
@@ -259,9 +296,13 @@ const Panel = (() => {
     if (au) au.onchange = () => { Panel.showAudio = au.checked; render(); };
   }
 
-  body.addEventListener('click', ev => {
+  body.addEventListener('click', async ev => {
+    const sc = ev.target.closest('[data-scope]');
+    if (sc) { scope = sc.dataset.scope; render(); return; }
     const el = ev.target.closest('[data-t]');
-    if (el) V.seekTo(Math.max(0, parseFloat(el.dataset.t) - (el.classList.contains('chip') ? 1.0 : 0.02)));
+    if (!el) return;
+    if (el.dataset.clip && el.dataset.clip !== V.D?.stem) await V.openClip(el.dataset.clip);
+    V.seekTo(Math.max(0, parseFloat(el.dataset.t) - (el.classList.contains('chip') ? 1.0 : 0.02)));
   });
   document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => {
     tab = b.dataset.tab; document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b)); render();

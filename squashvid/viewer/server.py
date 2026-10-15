@@ -80,6 +80,25 @@ def create_app(work=None):
                 out.append({"stem": d.name, "proxy": (d / "proxy.mp4").exists()})
         return {"clips": out}
 
+    # The coaching pooled over every clip (`python -I -m squashvid.analysis --all --pooled`), registered before the
+    # per-clip routes so "pooled" is never taken for a clip.
+    @app.get("/api/pooled/insights")
+    def pooled_insights():
+        p = work / "analysis" / "insights.json"
+        if not p.exists():
+            raise HTTPException(404, "no pooled analysis yet: run `python -I -m squashvid.analysis --all --pooled`")
+        return Response(p.read_bytes(), media_type="application/json", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/api/pooled/report")
+    def pooled_report():
+        from squashvid.analysis.report import render_pooled
+
+        try:
+            ins = json.loads((work / "analysis" / "insights.json").read_text())
+        except (OSError, ValueError):
+            raise HTTPException(404, "no pooled analysis yet: run `python -I -m squashvid.analysis --all --pooled`") from None
+        return JSONResponse({"markdown": render_pooled(ins, load_settings(settings_path)["names"])}, headers={"Cache-Control": "no-cache"})
+
     @app.get("/api/{stem}/meta")
     def meta(stem: str):
         p = stem_dir(stem) / "viewer" / "meta.json"

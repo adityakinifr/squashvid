@@ -7,6 +7,9 @@ to try carries why it matters (its numbers and, for position, what being away fr
 watch with what to look for in them, and one drill. Every sentence with a number cites the candidates it rests
 on and passes the insights verifier; the headlines, cues and drills are fixed coaching text with no numbers.
 
+Findings that rest on who won each rally (inferred from who served next) may say won and lost, and carry a caveat
+in their detail; for position, what holding the T was worth in rallies won is one of the reasons.
+
 Text names players as {A} and {B}; fill() swaps in the saved names when a report or the viewer shows it.
 """
 
@@ -23,12 +26,14 @@ MAX_KEEP = 2
 THEMES = {
     "position": ("Getting back to the T", 1.0),
     "length": ("Length", 0.9),
+    "errors": ("Fewer mistakes at the end of rallies", 0.85),
     "pressure": ("Taking time away from the opponent", 0.8),
     "stamina": ("Keeping it up to the end", 0.6),
 }
 THEME_OF = {
     "t_at_strike": "position", "t_overall": "position", "t_share": "position", "recovered": "position",
     "recover_from_back": "position", "off_T_cost": "position", "time_given": "pressure", "deep_bounce": "length",
+    "won_on_T": "position", "last_shot_error": "errors",
 }
 # Plays about one situation rather than a whole match; a narrow thing to try may sit beside a broad one to keep.
 NARROW = {"recover_from_back", "short_time"}
@@ -84,6 +89,12 @@ PLAYBOOK = {
         "look": "where the ball first bounces after {p}'s shot",
         "drill": "Length targets: put a towel just behind each service box and count how many of 20 drives bounce on or behind it. Try to beat the number each session.",
     },
+    "last_shot_error": {
+        "try": "When you are under pressure, hit a safe straight drive to the back instead of going for a winner.",
+        "keep": "Your rallies rarely end with your own mistake. Keep choosing the safe shot when you are under pressure.",
+        "look": "{p}'s last shot of the rally: where {p} was, and whether a safer shot was on",
+        "drill": "Safe-shot games: play first to 7, where a ball into the tin or out costs two points and a straight drive past the service box is always allowed. Then play the same game where short shots are allowed only from in front of the short line.",
+    },
     "early_late:t_at_strike": {
         "try": "Keep getting back to the T in the last rallies, not just the first ones.",
         "keep": "You keep getting back to the T right to the end.",
@@ -109,10 +120,14 @@ WHY = {
     "time_given": "{p}'s shots gave {o} {v} s on average to reply; {o}'s gave {p} {c} s.",
     "deep_bounce": "{v}% of {p}'s measured shots first bounced behind the service box; {c}% of {o}'s did.",
     "short_time": "After a rushed shot (under {split} s), {p} got back near the T {v}% of the time, against {c}% after shots with more time.",
+    "last_shot_error": "Of the {n_own} rallies that ended on {p}'s shot, {o} won {lost_own} ({v}%); of the {o_n_own} that ended on {o}'s shot, {p} won {o_lost_own} ({c}%).",
+    "won_on_T": "{p} won {won_more} of the {n_more} rallies in which {p} spent more time near the T than {o}, and {won_less} of the other {n_less}.",
     "early_late:t_at_strike": "In the later rallies {p} was on average {v} m from the T when {o} hit, against {c} m in the earlier ones.",
     "early_late:recovered": "In the later rallies {p} was back near the T before the next shot {v}% of the time, against {c}% in the earlier ones.",
 }
 UNIT_GAP = {"%": " percentage points", "m": " m", "s": " s"}
+# Said once in the detail of any item that rests on the inferred rally winners.
+WINNER_CAVEAT = "Who won each rally is inferred from who served the next one; a let, or a last shot the tracking missed, can put a rally on the wrong side."
 
 
 def theme(c: dict) -> str:
@@ -146,7 +161,7 @@ def confidence(c: dict) -> str:
 
 def why(c: dict) -> str:
     d, p = c["display"], c["player"]
-    return WHY[play(c)].format(p=tok(p), o=tok(other(p)), v=d["value"], c=d.get("comparison", ""), far_m=d.get("far_m", ""), split=d.get("split", ""))
+    return WHY[play(c)].format(**{**d, "p": tok(p), "o": tok(other(p)), "v": d["value"], "c": d.get("comparison", "")})
 
 
 def basis(c: dict) -> str:
@@ -191,6 +206,13 @@ def item(c: dict, kind: str, cands: list[dict]) -> dict:
             reasons.append(why(cost))
             cites.append(cost["id"])
             evidence = evidence[:2] + cost["evidence"][:1]
+    if theme(c) == "position" and play(c) in ("t_share", "t_overall", "t_at_strike"):
+        # What holding the T was worth, in rallies: told for both a thing to try and one to keep.
+        worth = next((x for x in cands if x["player"] == p and x["metric"] == "won_on_T" and x["favourable"]), None)
+        if worth is not None:
+            reasons.append(why(worth))
+            cites.append(worth["id"])
+    rests_on_winners = any(x.get("allows") for x in [c, *support, *(x for x in cands if x["id"] in cites)])
     return {
         "theme": theme(c),
         "title": THEMES[theme(c)][0],
@@ -200,7 +222,7 @@ def item(c: dict, kind: str, cands: list[dict]) -> dict:
         "why": reasons,
         "look_for": book["look"].format(**fmt),
         "drill": book["drill"] if kind == "try" else None,
-        "detail": [basis(c)] + [f"{why(x)} {basis(x)}" for x in support],
+        "detail": [basis(c)] + [f"{why(x)} {basis(x)}" for x in support] + ([WINNER_CAVEAT] if rests_on_winners else []),
         "evidence": evidence,
         "cites": cites + [x["id"] for x in support],
         "confidence": confidence(c),

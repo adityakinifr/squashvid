@@ -88,3 +88,27 @@ def test_fill_swaps_tokens_for_names_and_leaves_other_text():
 def test_clear_only_when_the_whole_interval_clears_the_smallest_gap_worth_coaching():
     assert C.confidence(cand(1, "t_share", True, ci=(0.1, 0.2))) == "clear"  # min_effect 0.08
     assert C.confidence(cand(1, "t_share", True, ci=(0.05, 0.2))) == "likely"
+
+
+def test_a_position_item_says_what_holding_the_T_was_worth_and_carries_the_winner_caveat():
+    main = cand(1, "t_share", False)
+    worth = {**cand(2, "won_on_T", True, value="56", comparison="27", won_more="9", n_more="16", won_less="11", n_less="41"), "role": "why", "allows": ["won_lost"]}
+    it = C.item(main, "try", [main, worth])
+    assert "{A} won 9 of the 16 rallies in which {A} spent more time near the T than {B}, and 11 of the other 41." in it["why"]
+    assert C.WINNER_CAVEAT in it["detail"]
+    out, rejected = C.write([main, worth])
+    assert rejected == [] and out["A"]["try"][0]["why"] == it["why"]
+
+
+def test_a_finding_without_the_winners_has_no_winner_caveat():
+    main = cand(1, "t_share", False)
+    assert C.WINNER_CAVEAT not in C.item(main, "try", [main])["detail"]
+
+
+def test_errors_at_the_end_of_rallies_are_told_with_counts_that_pass_the_verifier():
+    c = {**cand(1, "last_shot_error", False, value="67", comparison="36", n_own="24", lost_own="16", o_n_own="33", o_lost_own="12"), "allows": ["won_lost"]}
+    out, rejected = C.write([c])
+    assert rejected == []
+    it = out["A"]["try"][0]
+    assert it["theme"] == "errors"
+    assert it["why"] == ["Of the 24 rallies that ended on {A}'s shot, {B} won 16 (67%); of the 33 that ended on {B}'s shot, {A} won 12 (36%)."]

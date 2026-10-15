@@ -36,3 +36,14 @@ def test_ball_table_says_how_many_shots_the_shares_rest_on():
     rows = R.ball_table(_stats())
     assert "10 of 40" in rows[2]
     assert len(rows) == 2 + 9
+
+
+def test_how_rallies_ended_is_shown_only_when_winners_were_inferred():
+    from squashvid.analysis.report import outcomes_section
+
+    assert outcomes_section(None) == [] and outcomes_section({"n_rallies": 5, "n_decided": 0}) == []
+    p = {"won": 3, "serving": [2, 4], "receiving": [1, 3], "short": [1, 3], "long": [2, 4], "ended_on_own_shot": [2, 5]}
+    lines = outcomes_section({"n_rallies": 9, "n_decided": 7, "long_from_shots": 6, "players": {"A": p, "B": p}})
+    text = "\n".join(lines)
+    assert "## How rallies ended (inferred)" in text and "2 of 9 rallies have no winner" in text
+    assert "| Won when serving | 2 of 4 | 2 of 4 |" in text and "(6 shots or more)" in text

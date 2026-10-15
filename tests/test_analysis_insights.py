@@ -98,3 +98,13 @@ def test_a_gap_too_small_to_matter_is_suppressed_even_when_certain():
 def test_a_candidate_with_no_interval_is_suppressed():
     out = I.finalise([{**CAND, "display": {}}], with_suppressed=True)
     assert out[0]["suppressed"] == "no interval"
+
+
+def test_won_and_lost_pass_only_in_sentences_citing_a_candidate_built_on_the_inferred_winners():
+    plain = {**CAND, "id": "c2"}
+    winners = {**CAND, "id": "c3", "allows": ["won_lost"]}
+    by_id = {"c2": plain, "c3": winners}
+    assert not I.verify_sentence("A won 12 rallies.", ["c2"], by_id)[0]
+    ok, why = I.verify_sentence("A won 12 rallies.", ["c3"], by_id)
+    assert ok, why
+    assert not I.verify_sentence("Keep your head still; A won 12 rallies.", ["c3"], by_id)[0]  # only the named ban is lifted

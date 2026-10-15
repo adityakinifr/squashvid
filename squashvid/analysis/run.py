@@ -11,6 +11,7 @@ from squashvid.analysis import hits as H
 from squashvid.analysis import rallies as R
 from squashvid.analysis import stats as S
 from squashvid.analysis.io import PLAYERS, Match, load, out_dir
+from squashvid.analysis.serves import add_servers
 
 log = logging.getLogger("squashvid.analysis")
 
@@ -23,7 +24,7 @@ def detect(m: Match) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     raw = H.detect_hits(m)
     rallies, hits, ev = R.segment(m, raw, swings)
     hits = H.add_context(hits, m)
-    return rallies, hits, ev
+    return add_servers(m, rallies, hits), hits, ev
 
 
 def write_tables(m: Match, rallies: pd.DataFrame, hits: pd.DataFrame) -> None:
@@ -62,6 +63,7 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
     from squashvid.analysis import insights as I
     from squashvid.analysis import report as P
     from squashvid.analysis.io import WORK
+    from squashvid.analysis.serves import outcomes
 
     parts, m0 = [], None
     for i, stem in enumerate(stems):
@@ -77,6 +79,7 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
         "clip": "+".join(stems),
         "editor": "coach",
         "n_rallies": int(facts.rallies.rally.nunique()),
+        "outcomes": outcomes(facts.rallies, facts.hits),
         "players": players,
         "candidates": [I._pub_c(c) for c in all_c],
         "rejected_sentences": rejected,

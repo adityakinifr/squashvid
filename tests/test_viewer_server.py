@@ -97,3 +97,19 @@ def test_settings_say_how_to_tell_the_players_apart(client):
     c, _ = client
     looks = c.get("/api/settings").json()["looks"]
     assert set(looks) == {"A", "B"} and all(looks.values())
+
+
+def test_pooled_coaching_is_served_with_the_saved_names(client):
+    c, work = client
+    assert c.get("/api/pooled/insights").status_code == 404 and c.get("/api/pooled/report").status_code == 404
+    item = {
+        "theme": "position", "title": "Getting back to the T", "kind": "try", "play": "t_share",
+        "headline": "After every shot, move back to the T before {B} hits.", "why": ["{A} spent 16% of rally time near the T."],
+        "look_for": "where {A} stands", "drill": "Ghosting.", "detail": [], "evidence": [], "cites": ["c1"], "confidence": "likely",
+    }
+    (work / "analysis").mkdir()
+    (work / "analysis" / "insights.json").write_text(json.dumps({"clip": "clip+other", "n_rallies": 40, "players": {"A": {"try": [item], "keep": []}, "B": {"try": [], "keep": []}}}))
+    assert c.get("/api/pooled/insights").json()["n_rallies"] == 40
+    c.post("/api/settings", json={"names": {"A": "Deepti"}})
+    md = c.get("/api/pooled/report").json()["markdown"]
+    assert "Deepti spent 16% of rally time near the T." in md and "before Player B hits" in md

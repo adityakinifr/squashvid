@@ -64,7 +64,7 @@ const Timeline = (() => {
     const x = xOf(V.D.t[f]);
     ctx.fillStyle = '#ff3b3b'; ctx.fillRect(x - 1, 0, 2, H);
     document.getElementById('tl-time').textContent = fmtTime(V.D.t[f]);
-    document.getElementById('tl-frame').textContent = `frame ${f} / ${V.D.n - 1}`;
+    document.getElementById('tl-frame').textContent = `frame ${f} / ${V.D.n - 1}` + rallyText(rallyAt(V.D, V.D.t[f]));
   }
 
   const seekX = ev => V.seekTo(tOf(ev.clientX - cv.getBoundingClientRect().left));
@@ -74,3 +74,13 @@ const Timeline = (() => {
   new ResizeObserver(() => { size(); if (V.D) draw(V.frame); }).observe(cv);
   return { draw, invalidate() { key = ''; } };
 })();
+
+// The current rally, who served it and from which side, and who won it (inferred from who served next).
+function rallyText(r) {
+  if (!r) return '';
+  const side = { L: 'left', R: 'right' }[r.server_side];
+  let s = ` · rally ${r.label}`;
+  if (r.server) s += `: ${V.names[r.server]} served${side ? ' from the ' + side : ''}`;
+  if (r.winner) s += `, won by ${V.names[r.winner]} (inferred from the next serve)`;
+  return s;
+}

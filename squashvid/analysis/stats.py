@@ -301,7 +301,7 @@ def compute(m: Match, h: pd.DataFrame, rallies: pd.DataFrame, t_radius: float = 
             "Positions are smoothed foot points; foot position has not been checked against tape marks.",
             "Front-court depth resolution is coarse.",
             "Hitter and contact time come from pose, audio and alternation (ball events when present); see docs/main/analysis.md for accuracy.",
-            "Who won each rally is not known, so nothing here compares winners and losers.",
+            "Who won each rally is inferred from who served the next one (see analysis/serves.py); stats here do not use it.",
         ],
     }
     out["ball"] = ball_stats(m, h)

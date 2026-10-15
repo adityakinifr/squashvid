@@ -13,11 +13,13 @@
 3. Editor: squashvid.analysis.coach groups candidates into themes and writes the coaching.
 4. Verifier: rejects any sentence whose numbers or timestamps are not in the candidates it
    cites, any sentence that cites nothing, and any banned claim (technique, won/lost,
-   comparison to elite norms).
+   comparison to elite norms). A candidate may lift a ban for the sentences that cite it
+   (`allows`): those built on the inferred rally winners may say won and lost.
 
 Players appear in text as {A} and {B} (see `tok`); coach.fill puts in the saved names.
 
-No win/loss claims are made: who won each rally is not known.
+Who won a rally is inferred from who served the next one (squashvid.analysis.serves), never
+from the ball alone. Rallies without an inferred winner are left out of those candidates.
 """
 
 from __future__ import annotations
@@ -74,7 +76,8 @@ def verify_sentence(text: str, cites: list[str], by_id: dict[str, dict]) -> tupl
     missing = [c for c in cites if c not in by_id]
     if missing:
         return False, f"unknown candidate {missing[0]}"
-    bad = banned_hits(text)
+    lifted = {b for c in cites for b in by_id[c].get("allows", ())}
+    bad = [b for b in banned_hits(text) if b not in lifted]
     if bad:
         return False, f"banned: {bad[0]}"
     ok = allowed_numbers([by_id[c] for c in cites])
@@ -207,6 +210,8 @@ METRICS = {
     "deep_bounce": {"unit": "%", "better": "higher", "what": "how often your shots first bounce in the back of the court", "dec": 0, "scale": 100, "min_effect": 0.1},
     "recover_from_back": {"unit": "%", "better": "higher", "what": "getting back to the T after a shot from the back of the court", "dec": 0, "scale": 100, "min_effect": 0.1},
     "off_T_cost": {"unit": "%", "better": "lower", "what": "how often your next shot is rushed when you are far from the T as your opponent hits", "dec": 0, "scale": 100, "min_effect": 0.1},
+    "won_on_T": {"unit": "%", "better": "higher", "what": "how often you win the rallies in which you hold the T more than your opponent, against the others", "dec": 0, "scale": 100, "min_effect": 0.1},
+    "last_shot_error": {"unit": "%", "better": "lower", "what": "how often a rally that ends on your shot goes to your opponent", "dec": 0, "scale": 100, "min_effect": 0.1},
 }
 FAR_FROM_T_M = 2.0  # "far from the T" at the opponent's strike, for off_T_cost
 RUSHED = ("defence", "pressure")  # hits.SITUATION_RULES classes with under about 1.1 s, or stretched
@@ -392,6 +397,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         cands.append(c)
 
     cands.extend(_situational_candidates(h))
+    if "winner" in rr:
+        cands.extend(_winner_candidates(facts, h))
     if facts.ball is not None and len(facts.ball):
         cands.extend(_ball_candidates(facts))
 
@@ -475,6 +482,57 @@ def _situational_candidates(h: pd.DataFrame) -> list[dict]:
     return out
 
 
+def _winner_candidates(facts: Facts, h: pd.DataFrame) -> list[dict]:
+    """From the inferred rally winners: how the rallies that ended on a player's shot went, and how often a player
+    won when holding the T more than the opponent (a reason behind the position findings)."""
+    out = []
+    d = facts.rallies[facts.rallies.winner.notna()].copy()
+    if not len(d):
+        return out
+    last = h.sort_values("t").groupby("rally").tail(1).set_index("rally")
+    d["last"] = d.rally.map(last.hitter)
+    d["last_t"] = d.rally.map(last.t)
+    d = d[d["last"].notna()]
+    groups = {r: g for r, g in d.groupby("rally")}
+
+    def lost_own(x, q):
+        g = x[x["last"] == q]
+        return float((g.winner != q).mean()) if len(g) else np.nan
+
+    for p in PLAYERS:
+        o = other(p)
+        mine, theirs = d[d["last"] == p], d[d["last"] == o]
+        res = cluster_bootstrap(groups, lambda x, p=p, o=o: lost_own(x, p) - lost_own(x, o))
+        counts = {"n_own": len(mine), "lost_own": int((mine.winner != p).sum()), "o_n_own": len(theirs), "o_lost_own": int((theirs.winner != o).sum())}
+        c = _candidate(p, "vs_opponent", "last_shot_error", "vs opponent", lost_own(d, p), lost_own(d, o), res, len(mine), res["n_rallies"], extra=counts, n_label="rallies that ended on their shot")
+        c["allows"] = ["won_lost"]
+        rows = mine[(mine.winner != p) != c["favourable"]].assign(t=lambda x: x.last_t)
+        c["evidence"] = _windows(rows, label_fn=lambda r, p=p, o=o: f"rally {rally_no(r.rally)}: {tok(p)} hit the last shot, then {tok(r.winner)} served the next rally")
+        c["suppressed"] = suppress(c)
+        out.append(c)
+
+    share = {r: {q: float(np.mean(v[q] <= facts.t_radius)) if len(v[q]) else np.nan for q in PLAYERS} for r, v in facts.series.items()}
+    for p in PLAYERS:
+        o = other(p)
+        x = d.assign(more=[share.get(r, {}).get(p, np.nan) > share.get(r, {}).get(o, np.nan) for r in d.rally], win=d.winner == p)
+        more, less = x[x.more], x[~x.more]
+
+        def gap(y):
+            a, b = y[y.more].win, y[~y.more].win
+            return float(a.mean() - b.mean()) if len(a) and len(b) else np.nan
+
+        res = cluster_bootstrap({r: g for r, g in x.groupby("rally")}, gap)
+        counts = {"n_more": len(more), "won_more": int(more.win.sum()), "n_less": len(less), "won_less": int(less.win.sum())}
+        c = _candidate(p, "situational", "won_on_T", "holding the T more vs less than the opponent", float(more.win.mean()) if len(more) else np.nan, float(less.win.mean()) if len(less) else np.nan, res, len(more), res["n_rallies"], extra=counts, n_label="rallies holding the T more")
+        c["role"] = "why"
+        c["allows"] = ["won_lost"]
+        rows = less[~less.win].assign(t=lambda y: y.start_t + 1.5)
+        c["evidence"] = _windows(rows, label_fn=lambda r, p=p, o=o: f"rally {rally_no(r.rally)}: {tok(o)} held the T more, then served the next rally")
+        c["suppressed"] = suppress(c)
+        out.append(c)
+    return out
+
+
 def _ball_candidates(facts: Facts) -> list[dict]:
     b = facts.ball
     # Only length is judged. How close to the tin a shot goes is a choice (drops and kills aim there), so it is
@@ -510,6 +568,8 @@ def build(m: Match, hits: pd.DataFrame, rallies: pd.DataFrame, stats: dict | Non
     if facts is None:
         ball = ball_table(m, hits)
         facts = Facts.from_match(m, hits, rallies, ball=ball)
+    from squashvid.analysis.serves import outcomes
+
     all_cands = generate(facts, m.T, with_suppressed=True)
     players, rejected = coach.write([c for c in all_cands if c["suppressed"] is None])
     return {
@@ -517,6 +577,7 @@ def build(m: Match, hits: pd.DataFrame, rallies: pd.DataFrame, stats: dict | Non
         "editor": "coach",
         "ball_events_used": m.ball_events is not None,
         "n_rallies": int(facts.rallies.rally.nunique()),
+        "outcomes": outcomes(facts.rallies, facts.hits),
         "note": "A finding is used only when its 90% interval over rallies excludes zero, it rests on at least eight rallies and the difference is big enough to matter on court.",
         "players": players,
         "candidates": [_pub_c(c) for c in all_cands],
@@ -525,7 +586,7 @@ def build(m: Match, hits: pd.DataFrame, rallies: pd.DataFrame, stats: dict | Non
 
 
 def _pub_c(c: dict) -> dict:
-    keep = ("id", "player", "generator", "metric", "title", "comparison", "value", "comparison_value", "diff", "ci", "n", "n_label", "n_rallies", "favourable", "suppressed", "evidence", "display", "role")
+    keep = ("id", "player", "generator", "metric", "title", "comparison", "value", "comparison_value", "diff", "ci", "n", "n_label", "n_rallies", "favourable", "suppressed", "evidence", "display", "role", "allows")
     return {k: (None if isinstance(c.get(k), float) and not np.isfinite(c[k]) else c.get(k)) for k in keep}
 
 
