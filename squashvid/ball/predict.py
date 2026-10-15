@@ -3,6 +3,7 @@
     python -m squashvid.ball.predict blurball@576x1024 wasb-tennis [--windows IMG_4091-r12 ...] [--copies] [--roi front]
     python -m squashvid.ball.predict wasb-tennis --labelled claude-self   # only the labelled stretch of each window
     python -m squashvid.ball.predict blurball@576x1024 --coreml           # network as a Core ML program on the GPU
+    python -m squashvid.ball.predict blurball-ft:final@576x1024 --coreml --full   # whole originals, in chunks
 
 Outputs go to work/<stem>/ball/<variant>.parquet (frame, t, x, y, score, visible)
 in that clip's own pixels, merged with earlier runs of the same variant so
@@ -35,6 +36,8 @@ from squashvid.ball.clips import COPIES, COPY_SCALE, LABELS, ball_dir, is_origin
 
 FRONT_HW = (576, 1024)  # the front crop in original pixels
 LABEL_PAD = 8  # frames of context either side of a labelled stretch (trackers and 3-frame inputs need lead-in)
+CHUNK_S = 60.0  # whole-clip runs are saved a chunk at a time, so an interrupted run keeps what it finished
+CHUNK_LEAD_S = 1.0  # each chunk runs this far past both ends and drops the extra, so no frame is predicted without context
 
 
 def front_roi(original: str, frame: int) -> tuple[int, int, int, int]:
@@ -77,12 +80,25 @@ def labelled_span(w: dict, labeller: str, root: Path = LABELS) -> tuple[float, f
     return float(ts[max(w["i0"], int(f.min()) - LABEL_PAD)]), float(ts[min(w["i1"], int(f.max()) + LABEL_PAD)])
 
 
+def chunks(duration: float, size: float = CHUNK_S, lead: float = CHUNK_LEAD_S) -> list[tuple[float, float, float, float]]:
+    """(run_from, keep_from, keep_to, run_to) spans tiling [0, duration]; frames are kept on [keep_from, keep_to).
+
+    The last chunk keeps up to and including duration."""
+    out, t = [], 0.0
+    while t < duration:
+        end = min(duration, t + size)
+        out.append((max(0.0, t - lead), t, end, min(duration, end + lead)))
+        t = end
+    return out
+
+
 def run_one(spec: str, stem: str, start: float, end: float, roi=None, suffix: str = "", roi_name: str | None = None,
-            coreml: str | None = None, **kw) -> tuple[pd.DataFrame, str, dict]:
+            coreml: str | None = None, keep: tuple[float, float] | None = None, **kw) -> tuple[pd.DataFrame, str, dict]:
     """One variant over one span; a named roi ('front') replaces the pixel box in the variant name so windows merge.
 
     coreml names Core ML compute units (e.g. CPU_AND_GPU) to run the network as a Core ML program; the variant gets a
-    '-coreml' suffix so its output never overwrites the torch run it is compared against."""
+    '-coreml' suffix so its output never overwrites the torch run it is compared against. With keep=(t0, t1), frames
+    outside [t0, t1) are context only: predicted, then dropped before saving."""
     v = video(stem)
     hw = (1080, 1920) if is_original(stem) else (576, 1024)
     if coreml:
@@ -96,6 +112,12 @@ def run_one(spec: str, stem: str, start: float, end: float, roi=None, suffix: st
     t0 = time.perf_counter()
     df = det.run(v, start, end)
     wall = time.perf_counter() - t0
+    if keep is not None:
+        inside = (df.t >= keep[0]) & (df.t < keep[1])
+        context = set(df.frame[~inside])
+        df = df[inside].reset_index(drop=True)
+        if getattr(det, "candidates", None):
+            det.candidates = {f: c for f, c in det.candidates.items() if f not in context}
     variant = (det.variant.split("-roi")[0] + f"-{roi_name}" if roi and roi_name else det.variant) + suffix
     st = det.stats
     stats = dict(variant=variant, stem=stem, start=start, end=end, frames=len(df), wall_s=round(wall, 2), infer_s=round(st.infer_s, 2),
@@ -140,10 +162,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--coreml", nargs="?", const="CPU_AND_GPU", default=None, metavar="UNITS",
                    help="run the network as a Core ML program (default units CPU_AND_GPU; ALL adds the Neural Engine)")
     p.add_argument("--labelled", default=None, metavar="LABELLER", help="run only where this labeller has labels (padded)")
+    p.add_argument("--full", nargs="*", default=None, metavar="STEM",
+                   help="run over whole originals instead of the windows (default: every clip that has windows)")
     p.add_argument("--log", type=Path, default=LABELS.parent / "ball_runs.jsonl")
     a = p.parse_args(argv)
 
     wins = json.loads((LABELS / "windows.json").read_text())
+    if a.full is not None:
+        for stem in a.full or sorted({w["stem"] for w in wins}):
+            duration = float(video(stem).timestamps[-1]) + 1e-3  # so the last frame falls inside [keep_from, keep_to)
+            for run_from, keep_from, keep_to, run_to in chunks(duration):
+                for spec in a.specs:
+                    _, variant, stats = run_one(spec, stem, run_from, run_to, half=a.half, coreml=a.coreml, keep=(keep_from, keep_to))
+                    stats.update(window="full", roi="full", ts=time.time(), load=list(np.round(__import__("os").getloadavg(), 1)))
+                    with a.log.open("a") as fh:
+                        fh.write(json.dumps(stats) + "\n")
+                    print(json.dumps(stats), flush=True)
+        return 0
     if a.windows:
         wins = [w for w in wins if w["id"] in a.windows]
     for w in wins:

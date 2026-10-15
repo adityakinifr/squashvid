@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Squash match viewer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="bar">
+  <strong>Match viewer</strong>
+  <select id="clip" title="Clip"></select>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="o-court" checked> court lines</label>
+  <label><input type="checkbox" id="o-boxes" checked> boxes</label>
+  <label><input type="checkbox" id="o-skel" checked> skeletons</label>
+  <label><input type="checkbox" id="o-ball" checked> ball</label>
+  <span class="sep"></span>
+  <label>speed <select id="rate"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select></label>
+  <span class="sep"></span>
+  <button id="names-btn">Names</button>
+  <span id="names-form" hidden>
+    A <input id="name-A" size="10"> B <input id="name-B" size="10"> <button id="names-save">Save</button>
+  </span>
+  <span id="status" class="muted"></span>
+  <span class="grow"></span>
+  <span class="muted keys">space play &middot; &larr;/&rarr; frame &middot; [ ] rally</span>
+</header>
+<main id="grid">
+  <section id="video-panel" class="panel">
+    <div id="video-wrap"><video id="video" playsinline preload="auto"></video><canvas id="overlay"></canvas><div id="video-hud"></div></div>
+  </section>
+  <section id="three-panel" class="panel">
+    <div class="title">3D court
+      <span class="btns"><button data-view="behind">behind glass</button><button data-view="side">side</button><button data-view="top">top</button></span>
+      <label class="small"><input type="checkbox" id="o-skel3d" checked> skeletons</label>
+    </div>
+    <div id="three"></div>
+    <div id="three-hud" class="hud"></div>
+  </section>
+  <section id="top-panel" class="panel">
+    <div class="title">Top view
+      <select id="heat"><option value="off">no heatmap</option><option value="clip:A">heat A: clip</option><option value="clip:B">heat B: clip</option><option value="rally:A">heat A: rally</option><option value="rally:B">heat B: rally</option></select>
+      <label class="small"><input type="checkbox" id="o-bounces" checked> bounces</label>
+    </div>
+    <svg id="top" preserveAspectRatio="xMidYMid meet"></svg>
+  </section>
+  <section id="front-panel" class="panel">
+    <div class="title">Front wall
+      <select id="wall-scope"><option value="rally">current rally</option><option value="clip">whole clip</option></select>
+      <select id="wall-color"><option value="player">colour by player</option><option value="rally">colour by rally</option></select>
+    </div>
+    <svg id="front" preserveAspectRatio="xMidYMid meet"></svg>
+  </section>
+  <aside id="side" class="panel">
+    <nav id="tabs"><button data-tab="stats" class="on">Stats</button><button data-tab="insights">Insights</button><button data-tab="events">Events</button><button data-tab="report">Report</button></nav>
+    <div id="tab-body"></div>
+  </aside>
+  <section id="timeline-panel" class="panel">
+    <div id="time-readout"><span id="tl-time">0:00.00</span> <span class="muted" id="tl-frame"></span></div>
+    <canvas id="timeline"></canvas>
+  </section>
+</main>
+<script src="/static/vendor/three.min.js"></script>
+<script src="/static/vendor/OrbitControls.js"></script>
+<script src="/static/vendor/d3.min.js"></script>
+<script src="/static/data.js"></script>
+<script src="/static/overlay.js"></script>
+<script src="/static/view3d.js"></script>
+<script src="/static/views2d.js"></script>
+<script src="/static/panel.js"></script>
+<script src="/static/timeline.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

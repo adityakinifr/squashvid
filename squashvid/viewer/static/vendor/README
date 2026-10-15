@@ -1,0 +1,9 @@
+Vendored so the viewer works offline. Fetched from jsDelivr, unmodified.
+
+three.min.js       three.js r128 (three@0.128.0/build/three.min.js)         MIT   LICENSE-three.txt
+OrbitControls.js   three.js r128 (examples/js/controls/OrbitControls.js)     MIT   same licence
+d3.min.js          d3 7.9.0 (d3@7.9.0/dist/d3.min.js)                        ISC   LICENSE-d3.txt
+
+r128 is the last three.js line with a classic-script build and a global OrbitControls, which keeps the app free of
+a bundler and of import maps (Chrome and Safari both load it). d3 is ISC-licensed (permissive, MIT-equivalent
+terms), not MIT or BSD as often assumed; the licence text is kept alongside.

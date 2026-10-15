@@ -75,3 +75,13 @@ def test_windows_skip_knockups_and_stay_apart():
     assert [p["rally"] for p in picked] == [1, 3]  # busiest real rally, then a far one with a different tempo
     assert all(p["end"] - p["start"] <= windows.WINDOW_S for p in picked)
     assert [p["rally"] for p in windows.choose(r, exclude=[(0.0, 40.0)])][0] == 3
+
+
+def test_full_clip_chunks_tile_the_clip_with_context_on_both_sides():
+    duration = 150.0
+    spans = predict.chunks(duration, size=60.0, lead=1.0)
+    kept = [(k0, k1) for _, k0, k1, _ in spans]
+    assert kept[0][0] == 0.0 and kept[-1][1] == duration
+    assert all(a[1] == b[0] for a, b in zip(kept, kept[1:]))  # no gap, no overlap
+    for run_from, k0, k1, run_to in spans:
+        assert run_from == max(0.0, k0 - 1.0) and run_to == min(duration, k1 + 1.0)
