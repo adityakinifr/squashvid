@@ -35,3 +35,6 @@ sk-proj-*/
 
 # YouTube cookies (comment out this line if you need to deploy with cookies)
 # youtube_cookies.txt
+
+# Pipeline work products (per-clip parquet, overlays, labels)
+work/

@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ball labels</title>
+<style>
+  :root { --bg:#16181c; --panel:#1f2228; --line:#30343c; --text:#e6e6e6; --dim:#9aa0aa; --ok:#4cd07d; --occ:#ffb347; --bad:#ff5c5c; --accent:#6aa9ff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:13px/1.35 -apple-system, system-ui, sans-serif; overflow:hidden; }
+  #app { display:grid; grid-template-columns: 290px 1fr; height:100%; }
+  #side { background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; padding:10px 12px; }
+  #main { position:relative; display:grid; grid-template-rows: auto 1fr; min-width:0; }
+  #bar { display:flex; gap:14px; align-items:center; padding:6px 10px; border-bottom:1px solid var(--line); background:var(--panel); white-space:nowrap; overflow:hidden; }
+  #bar b { font-variant-numeric: tabular-nums; }
+  #stage { position:relative; overflow:hidden; cursor:crosshair; }
+  #view { position:absolute; inset:0; width:100%; height:100%; }
+  #loupe { position:absolute; width:220px; height:220px; border:2px solid #fff; border-radius:50%; pointer-events:none; display:none; box-shadow:0 0 0 1px #000, 0 4px 18px rgba(0,0,0,.6); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:14px 0 6px; }
+  .win { padding:6px 8px; border:1px solid var(--line); border-radius:6px; margin-bottom:6px; cursor:pointer; }
+  .win.cur { border-color:var(--accent); }
+  .win small { color:var(--dim); }
+  .prog { height:5px; background:#2b2f37; border-radius:3px; overflow:hidden; margin-top:4px; }
+  .prog > div { height:100%; background:var(--ok); }
+  .model { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  .swatch { width:12px; height:12px; border-radius:50%; border:2px solid; flex:none; }
+  .model.sel { font-weight:600; }
+  .model small { color:var(--dim); margin-left:auto; }
+  kbd { background:#2b2f37; border:1px solid #444; border-bottom-width:2px; border-radius:3px; padding:0 4px; font:11px ui-monospace, monospace; }
+  #keys div { margin:2px 0; color:var(--dim); }
+  #status { min-height:18px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .occ { color:var(--occ); }
+  label.tog { display:flex; gap:6px; align-items:center; margin:3px 0; color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <h2>Progress</h2>
+    <div id="overall"></div>
+    <div class="prog"><div id="overallbar" style="width:0"></div></div>
+    <h2>Rally windows</h2>
+    <div id="windows"></div>
+    <h2>Pre-labels <small style="text-transform:none;letter-spacing:0">(1-9 picks the one Space accepts)</small></h2>
+    <div id="models"></div>
+    <label class="tog"><input type="checkbox" id="lowscore"> show below-threshold points</label>
+    <h2>Display</h2>
+    <label class="tog"><input type="checkbox" id="autoadv" checked> advance after each label <kbd>G</kbd></label>
+    <label class="tog"><input type="checkbox" id="overlays" checked> overlays <kbd>H</kbd></label>
+    <label class="tog">contrast <kbd>C</kbd> <span id="contrastv"></span></label>
+    <h2>Keys</h2>
+    <div id="keys">
+      <div><b>click</b> ball at the centre of its blur</div>
+      <div><kbd>O</kbd> occluded: marks the current point, or the next click</div>
+      <div><kbd>N</kbd> not visible / out of frame</div>
+      <div><kbd>Space</kbd> accept the selected pre-label</div>
+      <div><kbd>R</kbd> racket contact on this frame</div>
+      <div><kbd>←</kbd><kbd>→</kbd> or <kbd>A</kbd><kbd>D</kbd> prev / next (<kbd>Shift</kbd> ×10)</div>
+      <div><kbd>U</kbd> next unlabelled frame</div>
+      <div><kbd>X</kbd> or <kbd>⌫</kbd> clear this frame's label</div>
+      <div>wheel zoom, drag pan, <kbd>F</kbd> fit, <kbd>Z</kbd> zoom to ball</div>
+    </div>
+    <h2>Status</h2>
+    <div id="status"></div>
+  </aside>
+  <section id="main">
+    <div id="bar">
+      <span id="wname"></span>
+      <span>frame <b id="fidx"></b></span>
+      <span><b id="fpos"></b></span>
+      <span>t <b id="ftime"></b> s</span>
+      <span id="lstate"></span>
+      <span id="mode"></span>
+    </div>
+    <div id="stage">
+      <canvas id="view"></canvas>
+      <canvas id="loupe" width="220" height="220"></canvas>
+    </div>
+  </section>
+</div>
+<script>
+"use strict";
+const COLOURS = ["#ff4d4d", "#4dd2ff", "#ffd24d", "#b84dff", "#4dff88", "#ff8c1a", "#ff4dd2", "#a6a6ff", "#d2ff4d"];
+const CONTRASTS = [[1, 1], [1.5, 0.92], [2.0, 0.85], [2.6, 0.8]];
+const LOUPE_ZOOM = 7, TRAIL = 6;
+
+const S = {
+  windows: [], target: 0, labeller: "", win: null, frame: 0, labels: {}, pre: {}, models: [], enabled: {},
+  sel: 0, cache: new Map(), img: null, view: { s: 1, x: 0, y: 0 }, fitted: true, pending: null,
+  mouse: null, drag: null, contrast: 1, retry: [],
+};
+const $ = (id) => document.getElementById(id);
+const view = $("view"), ctx = view.getContext("2d");
+const loupe = $("loupe"), lctx = loupe.getContext("2d");
+
+function status(msg, cls = "") { $("status").innerHTML = `<span class="${cls}">${msg}</span>`; }
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+async function loadWindows() {
+  const d = await api("/api/windows");
+  S.windows = d.windows; S.target = d.target; S.labeller = d.labeller;
+  renderWindows();
+}
+
+function renderWindows() {
+  const done = S.windows.reduce((a, w) => a + w.n_labelled, 0);
+  $("overall").innerHTML = `<b>${done}</b> of ${S.target} frames labelled by <b>${S.labeller}</b>`;
+  $("overallbar").style.width = `${Math.min(100, (100 * done) / Math.max(1, S.target))}%`;
+  $("windows").innerHTML = S.windows.map((w) => `
+    <div class="win ${S.win && S.win.id === w.id ? "cur" : ""}" data-id="${w.id}">
+      <div><b>${w.id}</b> <small>${w.start.toFixed(1)}–${w.end.toFixed(1)} s</small></div>
+      <small>${w.note || ""}</small>
+      <div><small>${w.n_labelled} / ${w.n_frames}</small></div>
+      <div class="prog"><div style="width:${(100 * w.n_labelled) / w.n_frames}%"></div></div>
+    </div>`).join("");
+  document.querySelectorAll(".win").forEach((el) => el.onclick = () => openWindow(el.dataset.id));
+}
+
+async function openWindow(id, frame) {
+  status("loading window…");
+  const w = await api(`/api/window/${encodeURIComponent(id)}`);
+  S.win = w; S.labels = {}; S.pre = {}; S.cache.clear();
+  for (const l of w.labels) S.labels[l.frame] = l;
+  // Model outputs first, best first (Space accepts the selected one); only the default layers start switched on.
+  // Other people's labels come last and stay hidden until switched on, so each labeller stays independent.
+  S.models = Object.keys(w.prelabels).sort((a, b) => a.startsWith("labels:") - b.startsWith("labels:"));
+  for (const m of S.models) {
+    S.pre[m] = {};
+    for (const [f, x, y, score, vis] of w.prelabels[m]) S.pre[m][f] = { x, y, score, vis };
+    if (!(m in S.enabled)) S.enabled[m] = (w.default_layers || []).includes(m);
+  }
+  S.sel = Math.min(S.sel, Math.max(0, S.models.length - 1));
+  renderModels(); renderWindows();
+  let start = frame ?? firstUnlabelled(w.i0);
+  goto(start ?? w.i0);
+  status(`window ${id}: ${w.i1 - w.i0 + 1} frames`, "ok");
+}
+
+function firstUnlabelled(from) {
+  for (let f = from; f <= S.win.i1; f++) if (!S.labels[f]) return f;
+  return null;
+}
+
+function renderModels() {
+  $("models").innerHTML = S.models.length ? S.models.map((m, i) => {
+    const c = COLOURS[i % COLOURS.length];
+    const n = Object.values(S.pre[m]).filter((p) => p.vis).length;
+    return `<label class="model ${i === S.sel ? "sel" : ""}"><input type="checkbox" data-m="${m}" ${S.enabled[m] ? "checked" : ""}>
+      <span class="swatch" style="border-color:${c}"></span>${i + 1}. ${m}<small>${n}</small></label>`;
+  }).join("") : `<small style="color:var(--dim)">none for this clip yet</small>`;
+  document.querySelectorAll("#models input").forEach((el) => el.onchange = () => { S.enabled[el.dataset.m] = el.checked; draw(); });
+}
+
+function frameUrl(f) { return `/api/frame/${encodeURIComponent(S.win.id)}/${f}.jpg`; }
+
+function getImage(f) {
+  if (f < S.win.i0 || f > S.win.i1) return null;
+  if (!S.cache.has(f)) {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = frameUrl(f);
+    img.onload = () => { if (f === S.frame) { S.img = img; draw(); } };
+    img.onerror = () => { S.cache.delete(f); if (f === S.frame) status(`frame ${f} failed to load; press a key to retry`, "bad"); };
+    S.cache.set(f, img);
+  }
+  return S.cache.get(f);
+}
+
+function preload(f) {
+  for (let d = 1; d <= 10; d++) getImage(f + d);
+  for (let d = 1; d <= 3; d++) getImage(f - d);
+  for (const k of [...S.cache.keys()]) if (Math.abs(k - f) > 40) S.cache.delete(k);
+}
+
+function goto(f) {
+  if (!S.win) return;
+  S.frame = Math.max(S.win.i0, Math.min(S.win.i1, f));
+  const img = getImage(S.frame);
+  S.img = img && img.complete && img.naturalWidth ? img : S.img;
+  if (S.fitted) fit();
+  else follow();
+  preload(S.frame);
+  location.hash = `${S.win.id}/${S.frame}`;
+  draw();
+}
+
+function cur() { return S.labels[S.frame]; }
+
+function fit() {
+  const w = view.clientWidth, h = view.clientHeight, iw = 1920, ih = 1080;
+  const s = Math.min(w / iw, h / ih);
+  S.view = { s, x: (w - iw * s) / 2, y: (h - ih * s) / 2 };
+  S.fitted = true;
+}
+
+function follow() {
+  // When zoomed in, keep the most recent labelled point on screen.
+  for (let d = 0; d <= 3; d++) {
+    const l = S.labels[S.frame - d];
+    if (l && l.x != null) {
+      const [sx, sy] = toScreen(l.x, l.y), m = 80;
+      if (sx < m || sy < m || sx > view.clientWidth - m || sy > view.clientHeight - m) centreOn(l.x, l.y);
+      return;
+    }
+  }
+}
+
+function centreOn(x, y, s) {
+  if (s) S.view.s = s;
+  S.view.x = view.clientWidth / 2 - (x + 0.5) * S.view.s;
+  S.view.y = view.clientHeight / 2 - (y + 0.5) * S.view.s;
+  S.fitted = false;
+}
+
+// Image pixel centres sit at integer coordinates: pixel (0, 0) covers [-0.5, 0.5).
+function toScreen(x, y) { return [S.view.x + (x + 0.5) * S.view.s, S.view.y + (y + 0.5) * S.view.s]; }
+function toImage(sx, sy) { return [(sx - S.view.x) / S.view.s - 0.5, (sy - S.view.y) / S.view.s - 0.5]; }
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  view.width = view.clientWidth * dpr; view.height = view.clientHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (S.fitted) fit();
+  draw();
+}
+
+function filter() {
+  const [c, b] = CONTRASTS[S.contrast];
+  return c === 1 ? "none" : `contrast(${c}) brightness(${b})`;
+}
+
+function ring(c, x, y, r, colour, dashed, width = 1.5) {
+  c.beginPath(); c.setLineDash(dashed ? [3, 3] : []); c.strokeStyle = colour; c.lineWidth = width;
+  c.arc(x, y, r, 0, 2 * Math.PI); c.stroke(); c.setLineDash([]);
+}
+
+function cross(c, x, y, r, colour) {
+  c.strokeStyle = colour; c.lineWidth = 1.5; c.beginPath();
+  c.moveTo(x - r, y); c.lineTo(x - r / 3, y); c.moveTo(x + r / 3, y); c.lineTo(x + r, y);
+  c.moveTo(x, y - r); c.lineTo(x, y - r / 3); c.moveTo(x, y + r / 3); c.lineTo(x, y + r); c.stroke();
+}
+
+// Draw overlays in image coordinates through a mapping function, so the view and the loupe share it.
+function overlays(c, map, scale) {
+  if (!$("overlays").checked) return;
+  const low = $("lowscore").checked, rr = Math.max(6, 5 * scale);
+  // Trail of neighbouring labels, faint, so the track's continuity is visible.
+  const pts = [];
+  for (let d = -TRAIL; d <= TRAIL; d++) {
+    const l = S.labels[S.frame + d];
+    if (d !== 0 && l && l.x != null) pts.push([d, ...map(l.x, l.y)]);
+  }
+  c.lineWidth = 1;
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i][0] - pts[i - 1][0] > 2 || (pts[i - 1][0] < 0) !== (pts[i][0] < 0)) continue;
+    c.strokeStyle = "rgba(255,255,255,0.25)"; c.beginPath(); c.moveTo(pts[i - 1][1], pts[i - 1][2]); c.lineTo(pts[i][1], pts[i][2]); c.stroke();
+  }
+  for (const [d, x, y] of pts) {
+    const a = 0.75 - Math.abs(d) * 0.09;
+    c.fillStyle = d < 0 ? `rgba(120,200,255,${a})` : `rgba(255,140,220,${a})`;
+    c.beginPath(); c.arc(x, y, 2.5, 0, 2 * Math.PI); c.fill();
+  }
+  S.models.forEach((m, i) => {
+    if (!S.enabled[m]) return;
+    const p = S.pre[m][S.frame];
+    if (!p || p.x == null || (!p.vis && !low)) return;
+    const [x, y] = map(p.x, p.y);
+    ring(c, x, y, rr, COLOURS[i % COLOURS.length], !p.vis, i === S.sel ? 2.2 : 1.3);
+  });
+  const l = cur();
+  if (l && l.x != null) {
+    const [x, y] = map(l.x, l.y);
+    cross(c, x, y, Math.max(10, 7 * scale), l.visibility === "occluded" ? "#ffb347" : "#4cd07d");
+  }
+}
+
+function draw() {
+  const w = view.clientWidth, h = view.clientHeight;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+  if (S.img && S.img.naturalWidth) {
+    ctx.imageSmoothingEnabled = S.view.s < 2;
+    ctx.filter = filter();
+    ctx.drawImage(S.img, S.view.x, S.view.y, 1920 * S.view.s, 1080 * S.view.s);
+    ctx.filter = "none";
+  }
+  overlays(ctx, toScreen, 1);
+  drawLoupe();
+  bar();
+}
+
+function drawLoupe() {
+  if (!S.mouse || !S.img || !S.img.naturalWidth || S.drag) { loupe.style.display = "none"; return; }
+  const [ix, iy] = toImage(S.mouse[0], S.mouse[1]);
+  const size = 220, half = size / (2 * LOUPE_ZOOM);
+  lctx.imageSmoothingEnabled = false;
+  lctx.fillStyle = "#000"; lctx.fillRect(0, 0, size, size);
+  lctx.save(); lctx.beginPath(); lctx.arc(size / 2, size / 2, size / 2, 0, 2 * Math.PI); lctx.clip();
+  lctx.filter = filter();
+  lctx.drawImage(S.img, ix + 0.5 - half, iy + 0.5 - half, 2 * half, 2 * half, 0, 0, size, size);
+  lctx.filter = "none";
+  const map = (x, y) => [size / 2 + (x - ix) * LOUPE_ZOOM, size / 2 + (y - iy) * LOUPE_ZOOM];
+  overlays(lctx, map, LOUPE_ZOOM / 3);
+  lctx.strokeStyle = "rgba(255,255,255,0.7)"; lctx.lineWidth = 1; lctx.beginPath();
+  lctx.moveTo(size / 2 - 14, size / 2); lctx.lineTo(size / 2 - 4, size / 2); lctx.moveTo(size / 2 + 4, size / 2); lctx.lineTo(size / 2 + 14, size / 2);
+  lctx.moveTo(size / 2, size / 2 - 14); lctx.lineTo(size / 2, size / 2 - 4); lctx.moveTo(size / 2, size / 2 + 4); lctx.lineTo(size / 2, size / 2 + 14); lctx.stroke();
+  lctx.restore();
+  loupe.style.display = "block";
+  const sw = view.clientWidth;
+  let lx = S.mouse[0] + 30, ly = S.mouse[1] - size - 30;
+  if (lx + size > sw) lx = S.mouse[0] - size - 30;
+  if (ly < 0) ly = S.mouse[1] + 30;
+  loupe.style.left = `${lx}px`; loupe.style.top = `${ly}px`;
+}
+
+function bar() {
+  if (!S.win) return;
+  const i = S.frame - S.win.i0;
+  $("wname").innerHTML = `<b>${S.win.id}</b>`;
+  $("fidx").textContent = S.frame;
+  $("fpos").textContent = `${i + 1} / ${S.win.i1 - S.win.i0 + 1}`;
+  $("ftime").textContent = S.win.t[i].toFixed(3);
+  const l = cur();
+  $("lstate").innerHTML = !l ? `<span style="color:var(--dim)">unlabelled</span>`
+    : l.visibility === "out" ? `<span class="bad">not visible / out</span>`
+    : `<span class="${l.visibility === "occluded" ? "occ" : "ok"}">${l.visibility} (${l.x.toFixed(1)}, ${l.y.toFixed(1)})${l.source === "accepted-prelabel" ? " ← " + l.prelabel : ""}</span>`;
+  $("lstate").innerHTML += l && l.event ? ` <b class="occ">RACKET</b>` : "";
+  $("mode").innerHTML = S.pending === "occluded" ? `<span class="occ">next click = occluded</span>` : "";
+  $("contrastv").textContent = CONTRASTS[S.contrast][0] + "×";
+}
+
+async function save(rec, advance) {
+  const body = { stem: S.win.stem, frame: S.frame, t: S.win.t[S.frame - S.win.i0], event: null, prelabel: null, source: "user", ...rec };
+  const frame = S.frame, prev = S.labels[frame];
+  if (body.source === "cleared") delete S.labels[frame]; else S.labels[frame] = body;
+  const w = S.windows.find((x) => x.id === S.win.id);
+  if (w) w.n_labelled += (prev ? 0 : 1) - (body.source === "cleared" && prev ? 1 : 0);
+  renderWindows();
+  if (advance && $("autoadv").checked && frame < S.win.i1) goto(frame + 1); else draw();
+  try {
+    await api("/api/label", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    status(`saved frame ${frame}`, "ok");
+  } catch (e) {
+    S.retry.push(body);
+    status(`NOT saved (frame ${frame}): ${e.message}. Will retry.`, "bad");
+  }
+}
+
+async function flushRetry() {
+  while (S.retry.length) {
+    const body = S.retry[0];
+    try { await api("/api/label", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); S.retry.shift(); status("retried saves succeeded", "ok"); }
+    catch { return; }
+  }
+}
+setInterval(flushRetry, 3000);
+
+const stage = $("stage");
+stage.addEventListener("mousemove", (e) => {
+  const r = view.getBoundingClientRect();
+  S.mouse = [e.clientX - r.left, e.clientY - r.top];
+  if (S.drag) {
+    const dx = e.clientX - S.drag.x0, dy = e.clientY - S.drag.y0;
+    if (Math.abs(dx) + Math.abs(dy) > 4) S.drag.moved = true;
+    if (S.drag.moved) { S.view.x = S.drag.vx + dx; S.view.y = S.drag.vy + dy; S.fitted = false; }
+  }
+  draw();
+});
+stage.addEventListener("mouseleave", () => { S.mouse = null; draw(); });
+stage.addEventListener("mousedown", (e) => { if (e.button === 0) S.drag = { x0: e.clientX, y0: e.clientY, vx: S.view.x, vy: S.view.y, moved: false }; });
+window.addEventListener("mouseup", (e) => {
+  const d = S.drag; S.drag = null;
+  if (!d || d.moved || !S.win || e.target !== view) { draw(); return; }
+  const r = view.getBoundingClientRect();
+  const [x, y] = toImage(e.clientX - r.left, e.clientY - r.top);
+  if (x < -0.5 || y < -0.5 || x > 1919.5 || y > 1079.5) return;
+  const vis = S.pending === "occluded" ? "occluded" : "visible";
+  S.pending = null;
+  save({ x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, visibility: vis, event: cur()?.event ?? null }, true);
+});
+stage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const r = view.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  const k = Math.exp(-e.deltaY * 0.0015), s = Math.max(0.2, Math.min(40, S.view.s * k));
+  S.view.x = mx - ((mx - S.view.x) * s) / S.view.s; S.view.y = my - ((my - S.view.y) * s) / S.view.s; S.view.s = s; S.fitted = false;
+  draw();
+}, { passive: false });
+
+window.addEventListener("keydown", (e) => {
+  if (!S.win || e.metaKey || e.ctrlKey || e.target.tagName === "INPUT") return;
+  const k = e.key, step = e.shiftKey ? 10 : 1, l = cur();
+  if (k === "ArrowRight" || k === "d" || k === "D") goto(S.frame + step);
+  else if (k === "ArrowLeft" || k === "a" || k === "A") goto(S.frame - step);
+  else if (k === "n" || k === "N") save({ x: null, y: null, visibility: "out" }, true);
+  else if (k === "o" || k === "O") {
+    if (l && l.x != null) save({ ...l, visibility: l.visibility === "occluded" ? "visible" : "occluded", source: l.source === "accepted-prelabel" ? "user" : l.source, prelabel: null }, false);
+    else { S.pending = S.pending === "occluded" ? null : "occluded"; draw(); }
+  } else if (k === " ") {
+    e.preventDefault();
+    const m = S.models[S.sel], p = m && S.pre[m][S.frame];
+    if (!p || p.x == null) { status(`no ${m || "model"} point on this frame`, "bad"); return; }
+    save({ x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, visibility: "visible", source: "accepted-prelabel", prelabel: m, event: l?.event ?? null }, true);
+  } else if (k === "r" || k === "R") {
+    if (!l || l.x == null) { status("click the ball first, then press R", "bad"); return; }
+    save({ ...l, event: l.event ? null : "racket" }, false);
+  } else if (k === "x" || k === "X" || k === "Backspace" || k === "Delete") {
+    if (l) save({ x: null, y: null, visibility: "out", source: "cleared" }, false);
+  } else if (k === "u" || k === "U") { const f = firstUnlabelled(S.frame + 1); if (f != null) goto(f); else status("no unlabelled frames after this one", "ok"); }
+  else if (k === "f" || k === "F") { fit(); draw(); }
+  else if (k === "z" || k === "Z") {
+    const m = S.models[S.sel], p = (l && l.x != null) ? l : (m && S.pre[m][S.frame]);
+    const back = [1, 2, 3].map((d) => S.labels[S.frame - d]).find((q) => q && q.x != null);
+    const t = (p && p.x != null) ? p : back;
+    if (t) { centreOn(t.x, t.y, 4); draw(); }
+  } else if (k === "g" || k === "G") { $("autoadv").checked = !$("autoadv").checked; }
+  else if (k === "h" || k === "H") { $("overlays").checked = !$("overlays").checked; draw(); }
+  else if (k === "c" || k === "C") { S.contrast = (S.contrast + 1) % CONTRASTS.length; draw(); }
+  else if (/^[1-9]$/.test(k) && +k <= S.models.length) { S.sel = +k - 1; renderModels(); draw(); }
+  else return;
+  e.preventDefault();
+});
+$("lowscore").onchange = draw;
+$("overlays").onchange = draw;
+window.addEventListener("resize", resize);
+
+(async function init() {
+  resize();
+  await loadWindows();
+  const [wid, f] = decodeURIComponent(location.hash.slice(1)).split("/");
+  const w = S.windows.find((x) => x.id === wid) || S.windows.find((x) => x.n_labelled < x.n_frames) || S.windows[0];
+  if (w) await openWindow(w.id, w.id === wid && f ? +f : undefined);
+  else status("no windows: run python -m squashvid.ball.windows first", "bad");
+})();
+</script>
+</body>
+</html>

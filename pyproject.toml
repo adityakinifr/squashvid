@@ -26,13 +26,29 @@ dependencies = [
 dev = [
   "pytest>=8.3.0"
 ]
+# The analysis pipeline (calibration, players, audio, ball): pip install -e ".[analysis]"
+analysis = [
+  "av>=15.1,<16",
+  "pandas>=2.3,<3",
+  "pyarrow>=21,<22",
+  "scipy>=1.17,<2",
+  "soundfile>=0.14,<0.15",
+  "matplotlib>=3.11,<4",
+  "ultralytics>=8.4.177,<8.5",
+  "lap>=0.5.13,<0.6",
+  "rtmlib>=0.0.16,<0.1",
+  "onnxruntime>=1.31,<2",
+  "torch>=2.7,<3",
+  "einops>=0.8.2,<0.9",
+  "coremltools>=9.0,<10"
+]
 
 [project.scripts]
 squashvid = "squashvid.cli:main"
 squashvid-api = "squashvid.api:main"
 
-[tool.setuptools]
-packages = ["squashvid", "squashvid.pipeline"]
+[tool.setuptools.packages.find]
+include = ["squashvid*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
