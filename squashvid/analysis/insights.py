@@ -218,7 +218,8 @@ def _display(metric: str, value: float, comp: float | None, ci: list[float], n: 
     d = {"value": _f(value, dec, scale), "diff_lo": _f(lo, dec, scale), "diff_hi": _f(hi, dec, scale), "n": str(n), "n_rallies": str(n_rallies)}
     if comp is not None:
         d["comparison"] = _f(comp, dec, scale)
-        d["diff"] = _f(value - comp, dec, scale)
+        # The size is the difference of the two numbers as shown, so a reader's own subtraction agrees with it.
+        d["diff"] = _f(round(value * scale, dec) - round(comp * scale, dec), dec)
     d.update({k: str(v) for k, v in (extra or {}).items()})
     return d
 

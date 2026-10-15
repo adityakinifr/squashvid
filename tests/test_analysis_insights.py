@@ -128,3 +128,10 @@ def test_template_editor_never_praises_and_criticises_the_same_behaviour():
     used = [it["metric"] for kind in ("strengths", "improvements") for it in items[kind]]
     assert used == ["t_at_strike"]
     assert items["strengths"][0]["candidate"] == "c2"  # the largest gap relative to its interval wins
+
+
+def test_the_quoted_difference_matches_the_quoted_numbers():
+    d = I._display("time_given", 1.4689, 1.3349, [0.01, 0.24], 45, 17)
+    assert (d["value"], d["comparison"], d["diff"]) == ("1.47", "1.33", "0.14")
+    d = I._display("t_share", 0.2654, 0.1684, [0.04, 0.17], 185, 17)
+    assert (d["value"], d["comparison"], d["diff"]) == ("27", "17", "10")
