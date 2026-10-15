@@ -168,16 +168,30 @@ const Panel = (() => {
       + (it.drill ? `<div class="drill"><b>Drill:</b> ${esc(it.drill)}</div>` : '')
       + `<details><summary>How sure</summary><div class="note">${sure} ${it.detail.map(f).join(' ')}</div></details></div>`;
   }
-  function coachHtml(players) {
+  // First, in plain words for each player: what they are doing well and what to work on. The cards with the
+  // evidence, drills and how sure follow for a coach or parent.
+  function summaryHtml(players) {
     return ['A', 'B'].map(p => {
       const mine = players[p] ?? { try: [], keep: [] };
       const look = V.looks?.[p] ? ` <span class="note">(${esc(V.looks[p])})</span>` : '';
-      let h = `<h4><span class="p${p.toLowerCase()}">${esc(V.names[p])}</span>${look}</h4>`;
+      const li = (it, mark) => `<li><span class="mark">${mark}</span>${esc(nameText(it.plain ?? it.headline))}</li>`;
+      let h = `<div class="summary"><h4><span class="p${p.toLowerCase()}">${esc(V.names[p])}</span>${look}</h4>`;
       if (!mine.try.length && !mine.keep.length) h += '<div class="note">Nothing stood out clearly enough to be sure of here. That is normal with only a few rallies.</div>';
+      if (mine.keep.length) h += `<div class="sum-good"><b>Doing well</b><ul>${mine.keep.map(it => li(it, '✓')).join('')}</ul></div>`;
+      if (mine.try.length) h += `<div class="sum-bad"><b>Work on</b><ul>${mine.try.map(it => li(it, '✗')).join('')}</ul></div>`;
+      return h + '</div>';
+    }).join('');
+  }
+  function coachHtml(players) {
+    const cards = ['A', 'B'].map(p => {
+      const mine = players[p] ?? { try: [], keep: [] };
+      if (!mine.try.length && !mine.keep.length) return '';
+      let h = `<h4><span class="p${p.toLowerCase()}">${esc(V.names[p])}</span></h4>`;
       if (mine.try.length) h += `<div class="note">Next time, try</div>${mine.try.map(coachCard).join('')}`;
       if (mine.keep.length) h += `<div class="note">Keep doing</div>${mine.keep.map(coachCard).join('')}`;
       return h;
     }).join('');
+    return summaryHtml(players) + (cards ? `<div class="detail-head">The details, for a coach or parent: why, the moments to watch and a drill</div>${cards}` : '');
   }
   const SKIP_INSIGHT_KEYS = new Set(['candidates', 'rejected_sentences']);
   function insightWalk(v, key, cls) {

@@ -159,10 +159,10 @@ def coaching(ins: dict, nm: dict[str, str], stem: str | None = None) -> list[str
         lines += [f"## {nm[p]} ({LOOKS[p]})", ""]
         if not mine["try"] and not mine["keep"]:
             lines += ["Nothing stood out clearly enough to be sure of here. That is normal with only a few rallies.", ""]
-        if mine["try"]:
-            lines += ["**Next time, try**", ""] + [f"{i}. {f(it['headline'])}" for i, it in enumerate(mine["try"], 1)] + [""]
         if mine["keep"]:
-            lines += ["**Keep doing**", ""] + [f"- {f(it['headline'])}" for it in mine["keep"]] + [""]
+            lines += ["**Doing well**", ""] + [f"- ✓ {f(it.get('plain', it['headline']))}" for it in mine["keep"]] + [""]
+        if mine["try"]:
+            lines += ["**Work on**", ""] + [f"- ✗ {f(it.get('plain', it['headline']))}" for it in mine["try"]] + [""]
     detail = [(p, it) for p in PLAYERS for kind in ("try", "keep") for it in ins["players"][p][kind]]
     if detail:
         lines += ["## For the coach or parent", ""]

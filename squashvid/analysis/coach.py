@@ -93,7 +93,7 @@ PLAYBOOK = {
     },
     "last_shot_error": {
         "try": "When you are under pressure, hit a safe straight drive to the back instead of going for a winner.",
-        "keep": "Your rallies rarely end with your own mistake. Keep choosing the safe shot when you are under pressure.",
+        "keep": "Fewer of your rallies end with your own mistake. Keep choosing the safe shot when you are under pressure.",
         "look": "{p}'s last shot of the rally: where {p} was, and whether a safer shot was on",
         "drill": "Safe-shot games: play first to 7, where a ball into the tin or out costs two points and a straight drive past the service box is always allowed. Then play the same game where short shots are allowed only from in front of the short line.",
     },
@@ -134,6 +134,34 @@ WHY = {
     "early_late:t_at_strike": "In the later rallies {p} was on average {v} m from the T when {o} hit, against {c} m in the earlier ones.",
     "early_late:recovered": "In the later rallies {p} was back near the T before the next shot {v}% of the time, against {c}% in the earlier ones.",
 }
+# The plain summary: one sentence per item, spoken to the player, saying what they did and how it compared, in
+# everyday terms ("about 1 in 3"). (good, needs work); {o} is the opponent, {v}/{c} and {v_in}/{c_in} the numbers.
+PLAIN = {
+    "t_share": ("You stay near the T, the middle of the court, more than {o}: {v}% of each rally, against {c}%.",
+                "You spend less time near the T, the middle of the court, than {o}: {v}% of each rally, against {c}%. Get back there after every shot."),
+    "t_overall": ("You stay close to the middle of the court: {v} m from the T on average, {o} {c} m.",
+                  "You drift away from the middle of the court: {v} m from the T on average, {o} {c} m."),
+    "t_at_strike": ("When {o} hits, you are usually ready near the T: {v} m away on average, {o} {c} m.",
+                    "When {o} hits, you are often still away from the T ({v} m on average, {o} {c} m), so you start late for the next ball."),
+    "recovered": ("After your shot you are back in the middle before the reply {v_in} times; {o} {c_in}.",
+                  "After your shot you are back in the middle before the reply only {v_in} times; {o} {c_in}."),
+    "recover_from_back": ("After a shot from the back you get back up to the T in time {v_in} times; {o} {c_in}.",
+                          "After a shot from the back you get back up to the T in time only {v_in} times; {o} {c_in}. Push up quicker."),
+    "short_time": ("Even after a rushed shot you get back to the middle.",
+                   "After a rushed shot you often stay where you are: back in the middle only {v_in} times."),
+    "time_given": ("Your shots rush {o}: {o} gets {v} s to reach them, while {o}'s shots give you {c} s.",
+                   "Your shots give {o} time: {v} s to reach them, while {o}'s shots give you {c} s."),
+    "deep_bounce": ("Your shots reach the back: {v_in} first bounce behind the service box; {o} {c_in}.",
+                    "Your shots often land short: only {v_in} first bounce behind the service box; {o} {c_in}."),
+    "last_shot_error": ("Fewer rallies end with your mistake than with {o}'s: of the {n_own} that ended on your shot, you lost {lost_own}; of the {o_n_own} that ended on {o}'s, {o} lost {o_lost_own}.",
+                        "Too many rallies end with your mistake: of the {n_own} that ended on your shot, you lost {lost_own}; of the {o_n_own} that ended on {o}'s, {o} lost {o_lost_own}."),
+    "upright_at_back": ("You bend your knees and get down to the ball at the back: only {v_in} of your shots there are hit standing up; {o} {c_in}.",
+                        "At the back you often hit standing up straight: {v_in} of your shots there; {o} {c_in}. Bend your knees and get low."),
+    "early_late:t_at_strike": ("You keep getting back to the T right to the end.",
+                               "In the later rallies you are further from the T when {o} hits ({v} m, against {c} m earlier): you may be tiring."),
+    "early_late:recovered": ("You keep getting back to the middle right to the end.",
+                             "In the later rallies you get back to the middle less: {v_in} times, against {c_in} earlier. You may be tiring."),
+}
 UNIT_GAP = {"%": " percentage points", "m": " m", "s": " s"}
 # Said once in the detail of any item that rests on the inferred rally winners.
 WINNER_CAVEAT = "Who won each rally is inferred from who served the next one; a let, or a last shot the tracking missed, can put a rally on the wrong side."
@@ -173,6 +201,16 @@ def confidence(c: dict) -> str:
 def why(c: dict) -> str:
     d, p = c["display"], c["player"]
     return WHY[play(c)].format(**{**d, "p": tok(p), "o": tok(other(p)), "v": d["value"], "c": d.get("comparison", "")})
+
+
+def plain(c: dict, kind: str) -> str:
+    """The plain summary sentence; the headline when the candidate lacks a number the sentence needs."""
+    d = c["display"]
+    good, bad = PLAIN[play(c)]
+    try:
+        return (good if kind == "keep" else bad).format(**{**d, "o": tok(other(c["player"])), "v": d["value"], "c": d.get("comparison", "")})
+    except KeyError:
+        return PLAYBOOK[play(c)][kind].format(p=tok(c["player"]), o=tok(other(c["player"])))
 
 
 def basis(c: dict) -> str:
@@ -230,6 +268,7 @@ def item(c: dict, kind: str, cands: list[dict]) -> dict:
         "kind": kind,
         "play": play(c),
         "headline": book[kind].format(**fmt),
+        "plain": plain(c, kind),
         "why": reasons,
         "look_for": book["look"].format(**fmt),
         "drill": book["drill"] if kind == "try" else None,
@@ -253,7 +292,10 @@ def _verified(it: dict, by_id: dict[str, dict], rejected: list[dict], p: str) ->
         return good
 
     reasons = keep(it["why"])
-    return {**it, "why": reasons, "detail": keep(it["detail"])} if reasons else None
+    if not reasons:
+        return None
+    said = keep([it["plain"]])
+    return {**it, "why": reasons, "detail": keep(it["detail"]), "plain": said[0] if said else it["headline"]}
 
 
 def write(cands: list[dict]) -> tuple[dict, list[dict]]:

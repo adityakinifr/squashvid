@@ -112,3 +112,16 @@ def test_errors_at_the_end_of_rallies_are_told_with_counts_that_pass_the_verifie
     it = out["A"]["try"][0]
     assert it["theme"] == "errors"
     assert it["why"] == ["Of the 24 rallies that ended on {A}'s shot, {B} won 16 (67%); of the 33 that ended on {B}'s shot, {A} won 12 (36%)."]
+
+
+def test_the_plain_line_says_shares_as_everyday_fractions_and_passes_the_verifier():
+    c = cand(1, "upright_at_back", False, value="32", comparison="14", upright_pct="8", v_in="about 1 in 3", c_in="about 1 in 7")
+    out, rejected = C.write([c])
+    assert rejected == []
+    assert out["A"]["try"][0]["plain"] == "At the back you often hit standing up straight: about 1 in 3 of your shots there; {B} about 1 in 7. Bend your knees and get low."
+
+
+def test_share_words_picks_the_nearest_everyday_fraction():
+    from squashvid.analysis.insights import share_words
+
+    assert [share_words(x) for x in (0.32, 0.14, 0.5, 0.01, 0.99)] == ["about 1 in 3", "about 1 in 7", "about 1 in 2", "almost none", "almost all"]

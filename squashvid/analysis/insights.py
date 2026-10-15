@@ -227,6 +227,22 @@ def _f(x: float, dec: int, scale: float = 1.0) -> str:
     return f"{abs(v):.{dec}f}" if dec else f"{abs(round(v)):d}"
 
 
+# Fractions a reader takes in at a glance, for the plain summary ("about 1 in 3").
+EVERYDAY_FRACTIONS = [(1, 10), (1, 8), (1, 7), (1, 6), (1, 5), (1, 4), (3, 10), (1, 3), (2, 5), (1, 2), (3, 5), (2, 3), (3, 4), (4, 5), (9, 10)]
+
+
+def share_words(x: float) -> str:
+    """A share as an everyday fraction: "about 1 in 3", "almost none", "almost all"."""
+    if not np.isfinite(x):
+        return "unknown"
+    if x < 0.05:
+        return "almost none"
+    if x > 0.95:
+        return "almost all"
+    a, b = min(EVERYDAY_FRACTIONS, key=lambda f: abs(f[0] / f[1] - x))
+    return f"about {a} in {b}"
+
+
 def _display(metric: str, value: float, comp: float | None, ci: list[float], n: int, n_rallies: int, extra: dict | None = None) -> dict:
     """Every number a sentence may quote, as the strings it will show. Differences are shown as sizes (the sign is in the wording)."""
     spec = METRICS.get(metric, {"dec": 2, "scale": 1})
@@ -237,6 +253,10 @@ def _display(metric: str, value: float, comp: float | None, ci: list[float], n: 
         d["comparison"] = _f(comp, dec, scale)
         # The size is the difference of the two numbers as shown, so a reader's own subtraction agrees with it.
         d["diff"] = _f(round(value * scale, dec) - round(comp * scale, dec), dec)
+    if spec.get("unit") == "%":
+        d["v_in"] = share_words(value)
+        if comp is not None:
+            d["c_in"] = share_words(comp)
     d.update({k: str(v) for k, v in (extra or {}).items()})
     return d
 

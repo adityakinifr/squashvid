@@ -79,3 +79,13 @@ details > summary { cursor: pointer; color: #666; margin: 10px 0 4px; font-size:
 .card .watch { margin: 2px 0; font-size: 12px; }
 .card .drill { margin-top: 6px; }
 .card details > summary { margin: 6px 0 0; }
+
+/* Plain summary at the top of Insights: doing well / work on, per player. */
+.summary { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.summary h4 { margin: 0 0 6px; }
+.summary ul { list-style: none; margin: 4px 0 8px; padding: 0; }
+.summary li { display: flex; gap: 6px; margin: 4px 0; line-height: 1.35; }
+.summary .mark { font-weight: 700; flex: none; }
+.sum-good b, .sum-good .mark { color: #1e8e3e; }
+.sum-bad b, .sum-bad .mark { color: #d93025; }
+.detail-head { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted, #777); }
