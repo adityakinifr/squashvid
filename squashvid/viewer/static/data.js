@@ -9,6 +9,16 @@ const V = {
   opts: {},
 };
 
+// Where the viewer reads its data: the local server's API, or, in a static build (static_build.py sets
+// window.SV_STATIC), files beside the page, which carry the names saved when the build was made.
+const URLS = window.SV_STATIC ? {
+  clips: 'data/clips.json', settings: 'data/settings.json', pooledInsights: 'data/pooled/insights.json', pooledReport: 'data/pooled/report.json',
+  meta: s => `data/${s}/meta.json`, array: (s, n) => `data/${s}/${n}.bin`, video: s => `data/${s}/video.mp4`, report: s => `data/${s}/report.json`,
+} : {
+  clips: '/api/clips', settings: '/api/settings', pooledInsights: '/api/pooled/insights', pooledReport: '/api/pooled/report',
+  meta: s => `/api/${s}/meta`, array: (s, n) => `/api/${s}/array/${n}`, video: s => `/api/${s}/proxy.mp4`, report: s => `/api/${s}/report`,
+};
+
 // Index of the frame showing at media time t: the last frame whose PTS <= t (same rule as export.frame_of_time).
 function frameOfTime(ts, t) {
   let lo = 0, hi = ts.length - 1;
@@ -30,7 +40,7 @@ function seekTimeOfFrame(ts, f) {
 const DTYPES = { int16: Int16Array, uint8: Uint8Array, float32: Float32Array, float64: Float64Array, int32: Int32Array, uint16: Uint16Array };
 
 async function loadArray(stem, name, info) {
-  const r = await fetch(`/api/${stem}/array/${name}`);
+  const r = await fetch(URLS.array(stem, name));
   if (!r.ok) return null;
   const raw = new (DTYPES[info.dtype])(await r.arrayBuffer());
   if (info.dtype === 'float32' || info.dtype === 'float64') return raw;
@@ -44,7 +54,7 @@ async function loadArray(stem, name, info) {
 }
 
 async function loadClip(stem) {
-  const meta = await (await fetch(`/api/${stem}/meta`)).json();
+  const meta = await (await fetch(URLS.meta(stem))).json();
   const D = { stem, meta, n: meta.n_frames, A: {}, B: {} };
   const jobs = Object.entries(meta.arrays).map(async ([name, info]) => {
     const a = await loadArray(stem, name, info);

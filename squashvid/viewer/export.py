@@ -290,6 +290,18 @@ def load_rallies(work: Path) -> tuple[list[dict], str | None]:
     return [], None
 
 
+def _pixel_size(proxy: Path) -> list[int] | None:
+    """[width, height] of the frames the image tracks are in pixels of (the proxy's), so the overlay stays in place
+    on a smaller copy of the video; None without the proxy."""
+    if not proxy.exists():
+        return None
+    import av
+
+    with av.open(str(proxy)) as c:
+        s = c.streams.video[0]
+        return [int(s.codec_context.width), int(s.codec_context.height)]
+
+
 def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = None, out_dir: Path | None = None,
            work_dir: Path | None = None) -> dict:
     """Write work/<stem>/viewer/. `timestamps` defaults to the original's PTS, else the proxy's, else the pose table's t."""
@@ -418,6 +430,7 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
         "fps": float((n - 1) / (ts[-1] - ts[0])) if n > 1 and ts[-1] > ts[0] else None,
         "sources": sources,
         "proxy": (work / "proxy.mp4").exists(),
+        "pixel_size": _pixel_size(work / "proxy.mp4"),
         "court": court_payload(spec),
         "camera_dist": clean(venue.camera(np.zeros(3), np.zeros(3)).dist.tolist()) if venue is not None else [0, 0, 0, 0, 0],
         # What each player looks like and holds, for painting and arming the 3D figures (viewer/appearance.py).

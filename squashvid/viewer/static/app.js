@@ -82,13 +82,14 @@
   // ---- names ----
   async function loadSettings() {
     try {
-      const s = await (await fetch('/api/settings')).json();
+      const s = await (await fetch(URLS.settings)).json();
       V.names = { ...V.names, ...s.names };
       if (s.looks) { V.looks = s.looks; $('look-A').textContent = `(${s.looks.A})`; $('look-B').textContent = `(${s.looks.B})`; $('names-btn').title = `Name the players: A wears the ${s.looks.A}, B the ${s.looks.B}`; }
     } catch (e) { console.warn('settings', e); }
     // A blank box keeps the default label; the server stores 'Player A' / 'Player B' for blanks.
     $('name-A').value = V.names.A === 'Player A' ? '' : V.names.A; $('name-B').value = V.names.B === 'Player B' ? '' : V.names.B;
   }
+  $('names-btn').hidden = !!window.SV_STATIC;  // a static build has no server to save names to
   $('names-btn').addEventListener('click', () => { $('names-form').hidden = !$('names-form').hidden; });
   $('names-save').addEventListener('click', async () => {
     const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: { A: $('name-A').value, B: $('name-B').value } }) });
@@ -101,7 +102,7 @@
     video.pause();
     const D = await loadClip(stem);
     V.D = D; annotateEvents(D);
-    video.src = `/api/${stem}/proxy.mp4`;
+    video.src = URLS.video(stem);
     View3D.buildCourt(D); TopView.rebuild(); FrontView.rebuild(); Timeline.invalidate();
     Panel.render();
     const s = D.meta.sources;
@@ -109,13 +110,26 @@
     $('status').textContent = `${stem}: ${D.n} frames` + (D.meta.proxy ? '' : ' (no proxy video: run the proxy command)') + (miss.length ? ` · missing: ${miss.join(', ')}` : '') + (s.ball && String(s.ball).startsWith('raw') ? ' · ball = raw detector' : '');
     location.hash = stem;
     lastDrawn = -1; readOpts(); renderFrame(0, true);
-    video.addEventListener('loadedmetadata', () => { Overlay.layout(); renderFrame(V.frame, true); }, { once: true });
+    video.addEventListener('loadedmetadata', () => { Overlay.layout(); renderFrame(V.frame, true); seekableOrBlob(stem); }, { once: true });
+  }
+
+  // A static host that ignores byte ranges leaves the video unseekable: then play it from memory (a static build
+  // keeps each video under 15 MB).
+  async function seekableOrBlob(stem) {
+    const s = video.seekable;
+    if (!window.SV_STATIC || (s.length && s.end(s.length - 1) >= video.duration - 1)) return;
+    console.warn('video not seekable from the host; loading it whole');
+    const url = URL.createObjectURL(await (await fetch(URLS.video(stem))).blob());
+    if (V.D?.stem !== stem) return URL.revokeObjectURL(url);
+    const t = video.currentTime;
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => { video.currentTime = t; }, { once: true });
   }
 
   (async () => {
     readOpts();
     await loadSettings();
-    const { clips } = await (await fetch('/api/clips')).json();
+    const { clips } = await (await fetch(URLS.clips)).json();
     if (!clips.length) { $('status').textContent = 'no exported clips: run `python -I -m squashvid.viewer export --all`'; return; }
     $('clip').innerHTML = clips.map(c => `<option>${c.stem}</option>`).join('');
     V.stems = clips.map(c => c.stem);

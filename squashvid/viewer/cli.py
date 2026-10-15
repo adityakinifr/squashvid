@@ -16,6 +16,9 @@ def main(argv: list[str] | None = None) -> int:
         if name == "proxy":
             s.add_argument("--encoder", default="h264_videotoolbox")
             s.add_argument("--check-only", action="store_true")
+    s = sub.add_parser("build-static", help="a copy of the viewer and its data as plain files (static_build.py)")
+    s.add_argument("--out", required=True)
+    s.add_argument("stems", nargs="*", help="clips to include (default: the same clips as --all)")
     s = sub.add_parser("serve")
     s.add_argument("--port", type=int, default=8771)
     s.add_argument("--host", default="127.0.0.1")
@@ -27,6 +30,13 @@ def main(argv: list[str] | None = None) -> int:
         from squashvid.viewer.server import create_app
 
         uvicorn.run(create_app(), host=a.host, port=a.port, log_level="warning")
+        return 0
+    if a.cmd == "build-static":
+        from pathlib import Path
+
+        from squashvid.viewer.static_build import build
+
+        print(json.dumps(build(Path(a.out), stems=a.stems or list(STEMS)), default=str), flush=True)
         return 0
     stems = STEMS if a.all else ([a.stem] if a.stem else [])
     if not stems:

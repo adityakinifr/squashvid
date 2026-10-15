@@ -4,8 +4,8 @@
 // A rigged child (Rocketbox Male_Child_02, MIT; built by squashvid/viewer/figure_model.py) is posed bone by bone from
 // the joints and painted in its player's colours as measured from the video; if it cannot load, a shaped capsule
 // figure with the same interface is used.
-const RIG_URL = '/static/vendor/models/kid.glb';
-const MASK_URL = { kid_body: '/static/vendor/models/kid_mask_body.png', kid_head: '/static/vendor/models/kid_mask_head.png' };
+const RIG_URL = 'static/vendor/models/kid.glb';
+const MASK_URL = { kid_body: 'static/vendor/models/kid_mask_body.png', kid_head: 'static/vendor/models/kid_mask_head.png' };
 const FIG = { buffer: null, masks: {}, state: 'idle', waiters: [] };  // idle | loading | ready | failed
 const loadImage = url => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = url; });
 function loadRigBuffer(cb) {
@@ -15,7 +15,7 @@ function loadRigBuffer(cb) {
   FIG.state = 'loading';
   const done = (ok) => { FIG.state = ok ? 'ready' : 'failed'; FIG.waiters.splice(0).forEach(w => w()); };
   const s = document.createElement('script');
-  s.src = '/static/vendor/GLTFLoader.js';  // classic-script r128 build; loaded here so index.html stays unchanged
+  s.src = 'static/vendor/GLTFLoader.js';  // classic-script r128 build; loaded here so index.html stays unchanged
   s.onload = () => Promise.all([fetch(RIG_URL).then(r => r.arrayBuffer()),
     ...Object.entries(MASK_URL).map(([k, u]) => loadImage(u).then(im => { FIG.masks[k] = im; }).catch(() => console.warn('figure mask failed to load:', u)))])
     .then(([b]) => { FIG.buffer = b; done(true); }).catch(e => { console.warn('figure model failed to load:', e); done(false); });

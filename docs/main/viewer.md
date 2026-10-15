@@ -17,6 +17,14 @@ Re-run `export` whenever the ball or analysis files change; every upstream file 
 
 Proxy: frames come from `Video(sdr=True)` (the project's HLG to SDR conversion), keyframe every 15 frames, `+faststart`, first audio stream copied. Presentation timestamps are written from the originals, so proxy time equals original time. The iPhone files also hold trailing packets that never decode (32 in IMG_4091), so the proxy has fewer frames than `Video.timestamps`; the check requires the shared PTS to match within one 1/600 s tick and every missing PTS to lie after the last proxy frame.
 
+## A static copy
+
+```bash
+python -I -m squashvid.viewer build-static --out DIR   # then: python -m http.server -d DIR
+```
+
+`squashvid/viewer/static_build.py` writes the page, its scripts and models, and every exported clip with a proxy as plain files, so the viewer runs from any static file host, or as a claude.ai artifact (`page.html` is the page without its document tags, for hosts that add their own). The page sets `window.SV_STATIC` and the scripts read `data/...` files instead of `/api` (the `URLS` table in `data.js`). Names are the ones saved when the copy was made, and the Names button is hidden. Each video is the proxy re-encoded to fit 14.5 MB (H.264 two-pass, 24 kbps mono audio, at the widest size that keeps 0.022 bits per pixel: 640 px for the 10-minute IMG_4089). The proxy's frame timestamps are kept and checked, and the encode is cached as `work/<stem>/web.mp4`. Tracks stay in the proxy's pixels (`meta.pixel_size`), so the overlay lines up on the smaller video. If the host ignores byte ranges and the video cannot seek, the page loads the whole video into memory.
+
 ## Panels
 
 - **Video** with a canvas overlay: court lines projected through that frame's camera (a calibration check), player boxes and skeletons (dashed box = interpolated, no keypoints), the ball with a comet trail over the last 0.5 s of its path (yellow ring = detected, orange = linked, dashed white = interpolated by the tracker, dashed pale = filled by the ball path; filled stretches of the trail are fainter). The overlay is drawn on the frame the video shows, so it stays on the picture.

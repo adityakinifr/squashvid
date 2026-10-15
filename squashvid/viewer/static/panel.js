@@ -216,7 +216,7 @@ const Panel = (() => {
   function pooledInsightsHtml() {
     if (pooled.insights === undefined) {
       pooled.insights = null;
-      fetch('/api/pooled/insights').then(r => r.ok ? r.json() : false).then(j => { pooled.insights = j; if (tab === 'insights') render(); }, () => { pooled.insights = false; });
+      fetch(URLS.pooledInsights).then(r => r.ok ? r.json() : false).then(j => { pooled.insights = j; if (tab === 'insights') render(); }, () => { pooled.insights = false; });
     }
     if (!pooled.insights) return pooled.insights === false ? '<div class="empty">No pooled analysis yet: run <code>python -I -m squashvid.analysis --all --pooled</code>.</div>' : '<div class="note">Loading…</div>';
     return `<div class="note">${pooled.insights.n_rallies} rallies from ${esc(pooled.insights.clip.split('+').join(', '))}. Moments in another clip open that clip.</div>` + coachHtml(pooled.insights.players);
@@ -285,7 +285,7 @@ const Panel = (() => {
       const key = [V.names.A, V.names.B].join('|');
       if (!(key in pooled.report)) {
         pooled.report[key] = undefined;
-        fetch('/api/pooled/report').then(r => r.ok ? r.json() : null).then(j => { pooled.report[key] = j ? j.markdown : null; if (tab === 'report') render(); }, () => { pooled.report[key] = null; });
+        fetch(URLS.pooledReport).then(r => r.ok ? r.json() : null).then(j => { pooled.report[key] = j ? j.markdown : null; if (tab === 'report') render(); }, () => { pooled.report[key] = null; });
       }
       const md = pooled.report[key];
       return scopeBar() + (md ? mdToHtml(md) : md === null ? '<div class="empty">No pooled analysis yet: run <code>python -I -m squashvid.analysis --all --pooled</code>.</div>' : '<div class="note">Loading…</div>');
@@ -297,7 +297,7 @@ const Panel = (() => {
     const md = key in reportCache ? reportCache[key] ?? D.meta.report : D.meta.report;
     if (!(key in reportCache)) {
       const done = j => { reportCache[key] = j ? j.markdown : null; if (tab === 'report' && V.D === D) render(); };
-      fetch(`/api/${D.stem}/report`).then(r => r.ok ? r.json() : null).then(done, () => done(null));
+      fetch(URLS.report(D.stem)).then(r => r.ok ? r.json() : null).then(done, () => done(null));
     }
     return md ? mdToHtml(md) : '<div class="empty">No analysis/report.md yet.</div>';
   }

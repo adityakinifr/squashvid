@@ -11,7 +11,8 @@ const Overlay = (() => {
   let rect = { x: 0, y: 0, w: 1, h: 1 };
 
   function layout() {
-    const vw = video.videoWidth || 1920, vh = video.videoHeight || 1080;
+    // Tracks are in the proxy's pixels; a static build may play a smaller copy of the video.
+    const [vw, vh] = V.D?.meta.pixel_size || [video.videoWidth || 1920, video.videoHeight || 1080];
     const W = wrap.clientWidth, H = wrap.clientHeight, s = Math.min(W / vw, H / vh);
     rect = { x: (W - vw * s) / 2, y: (H - vh * s) / 2, w: vw * s, h: vh * s };
     const dpr = window.devicePixelRatio || 1;
