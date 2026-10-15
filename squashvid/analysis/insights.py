@@ -190,7 +190,6 @@ METRICS = {
     "t_share": {"unit": "%", "better": "higher", "what": "how much of each rally you spend within about one metre of the T", "dec": 0, "scale": 100},
     "recovered": {"unit": "%", "better": "higher", "what": "how often you are back near the T before the next shot", "dec": 0, "scale": 100},
     "time_given": {"unit": "s", "better": "lower", "what": "how little time your shots leave your opponent", "dec": 2},
-    "near_tin": {"unit": "%", "better": "lower", "what": "how often your shots hit the front wall just above the tin", "dec": 0, "scale": 100},
     "deep_bounce": {"unit": "%", "better": "higher", "what": "how often your shots first bounce in the back of the court", "dec": 0, "scale": 100},
 }
 
@@ -200,7 +199,6 @@ COACHING = {
     "t_share": ("Hit, then straight back to the T.", "Solo ghosting around the T: eight corners, always finishing on the T."),
     "recovered": ("Hit, then straight back to the T.", "Pressure ghosting: a partner calls corners quickly and you finish each one on the T."),
     "time_given": ("Hit early and deep so they have less time.", "Boast and drive: hit to the back, move up early to volley the reply, and keep the pace."),
-    "near_tin": ("Aim a little higher on the front wall.", "Target practice: tape a line above the service line and hit ten in a row above it."),
     "deep_bounce": ("Aim for the back corners.", "Length drill: hit rails and see how many bounce behind the back of the service box."),
     "early_late": ("Keep your feet moving in the last minutes.", "Finish every practice with a minute of ghosting at full effort."),
     "short_time": ("When you are rushed, still get back to the T.", "Rushed-shot recovery: a partner feeds quick balls and you reset to the T after each one."),
@@ -421,11 +419,13 @@ def _two_sample(ga: dict, gb: dict, stat, n_boot: int = N_BOOT, alpha: float = A
 
 def _ball_candidates(facts: Facts) -> list[dict]:
     b = facts.ball
-    b = b.assign(near_tin=((b.z - b.attrs.get("tin_top", 0.48)) < 0.25).astype(float), deep=(b.bounce_y.notna() & (b.bounce_y < b.attrs.get("box_back_y", 2.6))).astype(float))
+    # Only length is judged. How close to the tin a shot goes is a choice (drops and kills aim there), so it is
+    # reported in the stats table and never ranked as a strength or a weakness.
+    b = b.assign(deep=(b.bounce_y.notna() & (b.bounce_y < b.attrs.get("box_back_y", 2.6))).astype(float))
     out = []
     for p in PLAYERS:
         o = other(p)
-        for metric, col in (("near_tin", "near_tin"), ("deep_bounce", "deep")):
+        for metric, col in (("deep_bounce", "deep"),):
 
             def fn(d, q, col=col):
                 g = d[d.hitter == q][col]
@@ -451,7 +451,6 @@ STEMS = {
     "t_share": "{p} spent {v}% of rally time within about 1 m of the T",
     "recovered": "{p} was back near the T before the next shot {v}% of the time",
     "time_given": "{p}'s shots left {o} {v} s before the reply",
-    "near_tin": "{p}'s front-wall shots were just above the tin {v}% of the time",
     "deep_bounce": "{p}'s shots first bounced in the back of the court {v}% of the time",
 }
 
@@ -647,5 +646,5 @@ def ball_table(m: Match, hits: pd.DataFrame) -> pd.DataFrame | None:
     if not rows:
         return None
     d = pd.DataFrame(rows)
-    d.attrs["tin_top"], d.attrs["box_back_y"] = float(m.spec.tin_top), float(m.spec.box_back_y)
+    d.attrs["box_back_y"] = float(m.spec.box_back_y)
     return d

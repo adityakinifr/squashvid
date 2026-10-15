@@ -20,7 +20,7 @@ def _stats(with_ball=True):
     }
     ball = {
         "n_shots_with_front_wall": 10,
-        "band": {"tin_to_service_line": _share(0.5), "service_line_to_2.5m": _share(0.2), "above_2.5m": _share(0.3)},
+        "band": {"below_tin": _share(0.05), "tin_to_service_line": _share(0.5), "service_line_to_2.5m": _share(0.2), "above_2.5m": _share(0.3)},
         "third": {"left": _share(0.3), "centre": _share(0.4), "right": _share(0.3)},
         "near_tin_share": _share(0.1),
     }
@@ -35,4 +35,4 @@ def test_per_frame_measures_cite_rallies_not_frames():
 def test_ball_table_says_how_many_shots_the_shares_rest_on():
     rows = R.ball_table(_stats())
     assert "10 of 40" in rows[2]
-    assert len(rows) == 2 + 8
+    assert len(rows) == 2 + 9

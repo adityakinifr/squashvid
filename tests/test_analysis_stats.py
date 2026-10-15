@@ -79,3 +79,12 @@ def test_findings_and_table_read_the_same_distance_from_T_samples():
         assert all(np.isfinite(d).all() for d in table)  # an unseen frame is unknown, not counted as away from the T
         for rid, d in zip(rallies.rally, table):
             np.testing.assert_array_equal(facts.series[rid][k], d)
+
+
+def test_impacts_below_the_tin_are_neither_near_the_tin_nor_between_tin_and_service_line():
+    from squashvid.geom.court import CourtSpec
+
+    s = CourtSpec()
+    z = np.array([s.tin_top - 0.3, s.tin_top + 0.1, s.tin_top + S.NEAR_TIN_M + 0.05, s.service_z + 0.1, 3.0])
+    assert list(S.near_tin(z, s)) == [False, True, False, False, False]
+    assert list(S.front_wall_band(z, s)) == ["below_tin", "tin_to_service_line", "tin_to_service_line", "service_line_to_2.5m", "above_2.5m"]

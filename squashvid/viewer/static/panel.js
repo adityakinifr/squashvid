@@ -106,9 +106,9 @@ const Panel = (() => {
     const B = S.ball;
     if (B && (B.A || B.B)) {
       rows.push(['Front-wall hits measured', p => String(at(B[p], 'n_shots_with_front_wall') ?? '')]);
-      for (const [k, txt] of [['tin_to_service_line', 'tin to service line'], ['service_line_to_2.5m', 'service line to 2.5 m'], ['above_2.5m', 'above 2.5 m']])
+      for (const [k, txt] of [['below_tin', 'below the tin'], ['tin_to_service_line', 'tin to service line'], ['service_line_to_2.5m', 'service line to 2.5 m'], ['above_2.5m', 'above 2.5 m']])
         rows.push([`Front-wall height: ${txt}`, p => meas(at(B[p], 'band')?.[k], true)]);
-      rows.push(['Within ~20 cm of the tin', p => meas(at(B[p], 'near_tin_share'), true)]);
+      rows.push([`Less than ${Math.round((at(S, 'params.near_tin_m') ?? 0.25) * 100)} cm above the tin`, p => meas(at(B[p], 'near_tin_share'), true)]);
       for (const k of ['left', 'centre', 'right']) rows.push([`Front-wall width: ${k} third`, p => meas(at(B[p], 'third')?.[k], true)]);
     }
     const m = S.match || {};

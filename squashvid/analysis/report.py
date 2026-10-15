@@ -7,6 +7,7 @@ import re
 
 from squashvid.analysis.insights import clock
 from squashvid.analysis.io import PLAYERS, WORK
+from squashvid.analysis.stats import NEAR_TIN_M
 
 
 def names() -> dict[str, str]:
@@ -62,10 +63,11 @@ def ball_table(stats: dict) -> list[str]:
 
     rows = [
         ("Shots with a measured front-wall impact", lambda p: f"{B[p]['n_shots_with_front_wall']} of {P[p]['shots']}"),
+        ("Below the top of the tin (a tin, or a mis-measured impact)", lambda p: pct(B[p]["band"].get("below_tin"))),
         ("Between the tin and the service line", lambda p: pct(B[p]["band"].get("tin_to_service_line"))),
         ("Between the service line and 2.5 m", lambda p: pct(B[p]["band"].get("service_line_to_2.5m"))),
         ("Above 2.5 m", lambda p: pct(B[p]["band"].get("above_2.5m"))),
-        ("Within about 20 cm of the tin", lambda p: pct(B[p].get("near_tin_share"))),
+        (f"Less than {NEAR_TIN_M * 100:.0f} cm above the tin", lambda p: pct(B[p].get("near_tin_share"))),
         ("Left third of the wall", lambda p: pct(B[p]["third"].get("left"))),
         ("Centre third", lambda p: pct(B[p]["third"].get("centre"))),
         ("Right third", lambda p: pct(B[p]["third"].get("right"))),

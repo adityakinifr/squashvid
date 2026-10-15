@@ -233,6 +233,19 @@ def per_rally(m: Match, h: pd.DataFrame, rallies: pd.DataFrame) -> list[dict]:
 # --- ball-dependent statistics --------------------------------------------------------------
 
 NEAR_TIN_M = 0.25  # front-wall contact within this height above the top of the tin
+BANDS = ["below_tin", "tin_to_service_line", "service_line_to_2.5m", "above_2.5m"]
+
+
+def front_wall_band(z: np.ndarray, spec) -> np.ndarray:
+    """Height band of front-wall contacts. Below the tin is a tin (an error) or a mis-measured impact."""
+    z = np.asarray(z, float)
+    return np.where(z < spec.tin_top, "below_tin", np.where(z < spec.service_z, "tin_to_service_line", np.where(z < 2.5, "service_line_to_2.5m", "above_2.5m")))
+
+
+def near_tin(z: np.ndarray, spec) -> np.ndarray:
+    """Front-wall contacts at or above the top of the tin and less than NEAR_TIN_M above it."""
+    d = np.asarray(z, float) - spec.tin_top
+    return (d >= 0) & (d < NEAR_TIN_M)
 
 
 def ball_stats(m: Match, h: pd.DataFrame) -> dict | None:
@@ -257,16 +270,16 @@ def ball_stats(m: Match, h: pd.DataFrame) -> dict | None:
     if not rows:
         return None
     d = pd.DataFrame(rows)
-    d["band"] = np.where(d.z < s.service_z, "tin_to_service_line", np.where(d.z < 2.5, "service_line_to_2.5m", "above_2.5m"))
+    d["band"] = front_wall_band(d.z, s)
     d["third"] = np.where(d.x < s.width / 3, "left", np.where(d.x < 2 * s.width / 3, "centre", "right"))
-    d["near_tin"] = (d.z - s.tin_top) < NEAR_TIN_M
+    d["near_tin"] = near_tin(d.z, s)
     d["length"] = np.where(d.bounce_y.isna(), None, np.where(d.bounce_y < s.box_back_y, "back", np.where(d.bounce_y < s.short_y + 1.0, "mid", "front")))
     out = {"note": "front-wall impacts attributed to the preceding shot; height z in metres above the floor"}
     rids = sorted(d.rally.unique())
     for k in PLAYERS:
         g = d[d.hitter == k]
         entry = {"n_shots_with_front_wall": int(len(g))}
-        for col, vals in (("band", ["tin_to_service_line", "service_line_to_2.5m", "above_2.5m"]), ("third", ["left", "centre", "right"])):
+        for col, vals in (("band", BANDS), ("third", ["left", "centre", "right"])):
             entry[col] = {v: _round_ci(bootstrap_ci([(d[(d.rally == r) & (d.hitter == k)][col] == v).to_numpy(float) for r in rids])) for v in vals}
         entry["near_tin_share"] = _round_ci(bootstrap_ci([d[(d.rally == r) & (d.hitter == k)].near_tin.to_numpy(float) for r in rids]))
         gl = g[g.length.notna()]
@@ -279,7 +292,7 @@ def compute(m: Match, h: pd.DataFrame, rallies: pd.DataFrame, t_radius: float = 
     out = {
         "clip": m.stem,
         "ball_events_used": m.ball_events is not None,
-        "params": {"t_radius_m": t_radius, "recovery_radius_m": RECOVERY_RADIUS_M, "bootstrap": {"resamples": BOOT, "interval": 1 - ALPHA, "unit": "rally"}, "t_point_m": [round(float(v), 3) for v in m.T], "short_line_y_m": round(float(m.spec.short_y), 3)},
+        "params": {"t_radius_m": t_radius, "recovery_radius_m": RECOVERY_RADIUS_M, "bootstrap": {"resamples": BOOT, "interval": 1 - ALPHA, "unit": "rally"}, "t_point_m": [round(float(v), 3) for v in m.T], "short_line_y_m": round(float(m.spec.short_y), 3), "near_tin_m": NEAR_TIN_M},
         "match": match_stats(m, h, rallies),
         "players": {k: player_stats(m, h, rallies, k, t_radius) for k in PLAYERS},
         "per_rally": per_rally(m, h, rallies),
