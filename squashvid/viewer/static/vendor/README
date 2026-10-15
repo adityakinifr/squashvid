@@ -9,5 +9,8 @@ a bundler and of import maps (Chrome and Safari both load it). d3 is ISC-license
 terms), not MIT or BSD as often assumed; the licence text is kept alongside.
 
 GLTFLoader.js     three.js r128 (examples/js/loaders/GLTFLoader.js)         MIT   same licence
-models/Xbot.glb   three.js r128 examples/models/gltf/Xbot.glb: a Mixamo-rigged humanoid used for the 3D figures
-                  (personal, non-commercial use; check Mixamo's terms before redistributing). view3d.js loads both on demand.
+models/kid.glb    Microsoft Rocketbox avatar Male_Child_02 (github.com/microsoft/Microsoft-Rocketbox)   MIT   LICENSE-rocketbox.txt
+                  Modified by squashvid/viewer/figure_model.py: bones renamed to Mixamo names, a head-top bone added,
+                  textures resized to 1024 px, exported as glTF. view3d.js loads it with GLTFLoader on demand.
+models/kid_mask_body.png, kid_mask_head.png  made by figure_model.py from the avatar's textures: which pixels are
+                  shirt, shorts and skin.

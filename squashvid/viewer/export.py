@@ -407,6 +407,8 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
     report = (a / "report.md").read_text() if (a / "report.md").exists() else None
     sources.update(hits=bool(hits), stats=stats is not None, insights=insights is not None, report=report is not None)
 
+    from squashvid.viewer.appearance import appearance, racket_hand
+
     summary = _read_json(work / "players_summary.json") or {}
     meta = {
         "schema_version": SCHEMA_VERSION,
@@ -418,7 +420,8 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
         "proxy": (work / "proxy.mp4").exists(),
         "court": court_payload(spec),
         "camera_dist": clean(venue.camera(np.zeros(3), np.zeros(3)).dist.tolist()) if venue is not None else [0, 0, 0, 0, 0],
-        "players": {"ids": list(PLAYERS), "hip_height_m": clean(summary.get("hip_height_m", {}))},
+        # What each player looks like and holds, for painting and arming the 3D figures (viewer/appearance.py).
+        "players": {"ids": list(PLAYERS), "hip_height_m": clean(summary.get("hip_height_m", {})), "look": appearance(work), "racket_hand": racket_hand(work)},
         "arrays": out.arrays,
         "rallies": rallies,
         "events": events,

@@ -1,10 +1,13 @@
 // Three.js court. World frame = court frame (x across, y back->front wall, z up); camera.up is +z.
 'use strict';
 // ---- Solid 3D figures driven by the lifted joints (bodies.parquet; H36M-17 order, court metres) ----------------------
-// A rigged humanoid (Mixamo-rig Xbot.glb from the three.js examples, personal use) is posed bone by bone from the joints;
-// if it cannot load, a shaped capsule figure with the same interface is used. Both are lit, tinted in the player colour.
-const RIG_URL = '/static/vendor/models/Xbot.glb';
-const FIG = { buffer: null, state: 'idle', waiters: [] };  // idle | loading | ready | failed
+// A rigged child (Rocketbox Male_Child_02, MIT; built by squashvid/viewer/figure_model.py) is posed bone by bone from
+// the joints and painted in its player's colours as measured from the video; if it cannot load, a shaped capsule
+// figure with the same interface is used.
+const RIG_URL = '/static/vendor/models/kid.glb';
+const MASK_URL = { kid_body: '/static/vendor/models/kid_mask_body.png', kid_head: '/static/vendor/models/kid_mask_head.png' };
+const FIG = { buffer: null, masks: {}, state: 'idle', waiters: [] };  // idle | loading | ready | failed
+const loadImage = url => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = url; });
 function loadRigBuffer(cb) {
   if (FIG.state === 'ready' || FIG.state === 'failed') return cb();
   FIG.waiters.push(cb);
@@ -13,10 +16,56 @@ function loadRigBuffer(cb) {
   const done = (ok) => { FIG.state = ok ? 'ready' : 'failed'; FIG.waiters.splice(0).forEach(w => w()); };
   const s = document.createElement('script');
   s.src = '/static/vendor/GLTFLoader.js';  // classic-script r128 build; loaded here so index.html stays unchanged
-  s.onload = () => fetch(RIG_URL).then(r => r.arrayBuffer()).then(b => { FIG.buffer = b; done(true); }).catch(e => { console.warn('figure model failed to load:', e); done(false); });
+  s.onload = () => Promise.all([fetch(RIG_URL).then(r => r.arrayBuffer()),
+    ...Object.entries(MASK_URL).map(([k, u]) => loadImage(u).then(im => { FIG.masks[k] = im; }).catch(() => console.warn('figure mask failed to load:', u)))])
+    .then(([b]) => { FIG.buffer = b; done(true); }).catch(e => { console.warn('figure model failed to load:', e); done(false); });
   s.onerror = () => { console.warn('GLTFLoader failed to load'); done(false); };
   document.head.appendChild(s);
 }
+
+// Mask labels (figure_model.py): grey level = LABEL_STEP x part.
+const LABEL_STEP = 60, PARTS = ['', 'shirt', 'shorts', 'skin'];
+
+// The texture repainted: pixels the mask labels with a part take that part's colour, keeping the texture's light and
+// shade (each pixel's brightness against the part's mean brightness). Parts without a colour keep the model's own.
+function paintTexture(img, mask, look) {
+  const w = img.width, h = img.height, cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.drawImage(img, 0, 0);
+  if (!mask) return cv;
+  const px = g.getImageData(0, 0, w, h), d = px.data;
+  const mc = document.createElement('canvas'); mc.width = w; mc.height = h;
+  const mg = mc.getContext('2d'); mg.imageSmoothingEnabled = false; mg.drawImage(mask, 0, 0, w, h);
+  const m = mg.getImageData(0, 0, w, h).data;
+  const cols = PARTS.map(p => p && look[p]), sum = new Float64Array(PARTS.length), cnt = new Float64Array(PARTS.length);
+  const lum = i => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  for (let i = 0; i < d.length; i += 4) { const l = Math.round(m[i] / LABEL_STEP); if (cols[l]) { sum[l] += lum(i); cnt[l]++; } }
+  for (let i = 0; i < d.length; i += 4) {
+    const l = Math.round(m[i] / LABEL_STEP), c = cols[l];
+    if (!c) continue;
+    const k = lum(i) / Math.max(1, sum[l] / cnt[l]);
+    d[i] = Math.min(255, c[0] * k); d[i + 1] = Math.min(255, c[1] * k); d[i + 2] = Math.min(255, c[2] * k);
+  }
+  g.putImageData(px, 0, 0);
+  return cv;
+}
+
+// A junior squash racket (0.62 m), along +y from the butt, strings in the xy plane.
+function makeRacket() {
+  const g = new THREE.Group();
+  const frame = new THREE.MeshStandardMaterial({ color: 0x2c3340, roughness: 0.45, metalness: 0.25 });
+  const grip = new THREE.MeshStandardMaterial({ color: 0x15161a, roughness: 0.9 });
+  const part = (geo, mat, y) => { const o = new THREE.Mesh(geo, mat); o.position.y = y; o.castShadow = true; g.add(o); return o; };
+  part(new THREE.CylinderGeometry(0.0135, 0.0155, 0.22, 10), grip, 0.11);
+  part(new THREE.CylinderGeometry(0.0065, 0.0085, 0.15, 8), frame, 0.295);
+  const head = part(new THREE.TorusGeometry(0.098, 0.0065, 8, 48), frame, 0.49);
+  head.scale.set(1, 1.3, 1);
+  const strings = part(new THREE.PlaneGeometry(0.19, 0.25), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), 0.49);
+  strings.castShadow = false;
+  return g;
+}
+const RACKET_COCK = 1.0;  // radians the racket turns from the forearm line toward the thumb (a cocked wrist)
 
 const _v = [0, 1, 2, 3, 4, 5].map(() => new THREE.Vector3());
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
@@ -30,14 +79,6 @@ function frameQuat(up, left, out) {
   return out.setFromRotationMatrix(_m.makeBasis(x, y, z));
 }
 
-const SHIRT = /^(Spine|Spine1|Spine2|Shoulder|Arm)$/, SHORTS = /^(Hips|UpLeg)$/, SHOE = /^(Foot|ToeBase|Toe_End)$/;
-function boneGroup(name) {
-  const n = name.replace(/^mixamorig:?/, '').replace(/^(Left|Right)/, '');
-  if (SHIRT.test(n)) return 'shirt';
-  if (SHORTS.test(n)) return 'shorts';
-  if (SHOE.test(n)) return 'shoe';
-  return 'skin';
-}
 const TONES = { skin: new THREE.Color('#c8946f'), shorts: new THREE.Color('#252a36'), shoe: new THREE.Color('#e9e9ee') };
 
 class RigFigure {
@@ -48,7 +89,13 @@ class RigFigure {
     this.root.add(this.model);
     this.bones = {};
     this.model.traverse(o => { if (o.isBone) this.bones[o.name.replace(/^mixamorig:?/, '')] = o; });
-    this.model.traverse(o => { if (o.isSkinnedMesh) { o.frustumCulled = false; this.tint(o, col); } });
+    this.meshes = [];
+    this.model.traverse(o => {
+      if (!o.isMesh) return;
+      o.frustumCulled = false; o.castShadow = true;
+      if (o.material.map) this.meshes.push({ mesh: o, image: o.material.map.image, mask: FIG.masks[o.material.name] });
+    });
+    this.paint({ shirt: [col.r * 255, col.g * 255, col.b * 255] });
     this.root.updateMatrixWorld(true);
     this.rp = {}; this.rq = {};
     for (const [n, b] of Object.entries(this.bones)) { this.rp[n] = b.getWorldPosition(new THREE.Vector3()); this.rq[n] = b.getWorldQuaternion(new THREE.Quaternion()); }
@@ -64,23 +111,37 @@ class RigFigure {
       const left = n === 'Head' ? new THREE.Vector3().crossVectors(UP, this.restFwd) : L.clone().normalize().lerp(S.clone().normalize(), w).normalize();
       this.frames[n] = frameQuat(UP, left, new THREE.Quaternion()).invert();
     }
+    this.racket = makeRacket();
+    this.hold('Right');
   }
 
-  tint(mesh, col) {
-    const names = mesh.skeleton.bones.map(b => b.name), g = mesh.geometry;
-    const si = g.attributes.skinIndex, sw = g.attributes.skinWeight, n = si.count, out = new Float32Array(n * 3);
-    const tone = { ...TONES, shirt: col }, c = new THREE.Color();
-    const grp = names.map(boneGroup);
-    for (let i = 0; i < n; i++) {
-      let r = 0, gg = 0, b = 0, w = 0;
-      for (let k = 0; k < 4; k++) {
-        const wt = sw.array[i * 4 + k]; if (!wt) continue;
-        c.copy(tone[grp[si.array[i * 4 + k]]]); r += c.r * wt; gg += c.g * wt; b += c.b * wt; w += wt;
-      }
-      out.set(w ? [r / w, gg / w, b / w] : [0.7, 0.7, 0.7], i * 3);
+  // Repaint the clothes and skin: look = {shirt, shorts, skin: [r, g, b] sRGB 0-255}, any may be missing.
+  paint(look) {
+    for (const { mesh, image, mask } of this.meshes) {
+      const tex = new THREE.CanvasTexture(paintTexture(image, mask, look));
+      tex.flipY = false;  // glTF texture convention
+      if (mesh.material.map) mesh.material.map.dispose();
+      mesh.material.map = tex; mesh.material.needsUpdate = true;
     }
-    g.setAttribute('color', new THREE.BufferAttribute(out, 3));
-    mesh.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.0, skinning: true });
+  }
+
+  // Put the racket in this hand ('Right' | 'Left'): the handle in the palm, turned RACKET_COCK from the forearm line
+  // toward the thumb, the strings facing the way the palm does.
+  hold(side) {
+    const hand = this.bones[`${side}Hand`], mid = this.rp[`${side}HandMiddle1`];
+    const thumbName = Object.keys(this.bones).find(n => new RegExp(`${side[0]}_?Finger0$`).test(n));
+    if (!hand || !mid || !thumbName) return;
+    const inv = this.rq[`${side}Hand`].clone().invert(), at = this.rp[`${side}Hand`];
+    const d = mid.clone().sub(at).applyQuaternion(inv).normalize();
+    const t = this.rp[thumbName].clone().sub(at).applyQuaternion(inv);
+    t.addScaledVector(d, -t.dot(d)).normalize();
+    const y = d.clone().multiplyScalar(Math.cos(RACKET_COCK)).addScaledVector(t, Math.sin(RACKET_COCK)).normalize();
+    const z = new THREE.Vector3().crossVectors(d, t).normalize(), x = new THREE.Vector3().crossVectors(y, z);
+    const k = 1 / hand.getWorldScale(new THREE.Vector3()).x;  // racket metres at rest, whatever the bone's scale
+    this.racket.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    this.racket.scale.setScalar(k);
+    this.racket.position.copy(d).multiplyScalar(0.06 * k).addScaledVector(y, -0.09 * k);
+    hand.add(this.racket);
   }
 
   set(b, qWorld) {
@@ -223,9 +284,18 @@ class Figure {
       if (FIG.state !== 'ready') return;
       new THREE.GLTFLoader().parse(FIG.buffer.slice(0), '', gltf => {
         this.rig = new RigFigure(gltf, this.col); this.group.add(this.rig.root); this.capsule.root.visible = false;
+        if (this.look) this.setLook(this.look, this.hand);
         View3D.dirtyFlag();
       }, err => console.warn('figure model failed to parse:', err));
     });
+  }
+
+  // The player's measured colours and racket hand (export meta.players), applied now or once the rig loads.
+  setLook(look, hand) {
+    this.look = look; this.hand = hand;
+    // Skin is not measured (too small and shaded in the video): every figure gets the capsule figure's neutral tone.
+    const rgb = c => [c.r * 255, c.g * 255, c.b * 255];
+    if (this.rig) { this.rig.paint({ shirt: rgb(this.col), ...look, skin: rgb(TONES.skin) }); this.rig.hold(hand === 'left' ? 'Left' : 'Right'); }
   }
 
   // Draw frame f of player P if its 3D pose is usable; returns whether something was drawn.
@@ -266,7 +336,12 @@ const View3D = (() => {
   scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x4a3b2a, 0.75));
   const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-  sun.position.set(3, -5, 9); scene.add(sun);
+  // The figures and racket cast real shadows onto the floor (a shadow-only plane over the court floor).
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  sun.target.position.set(3.2, 4.9, 0); sun.position.set(6.2, -0.1, 9); sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005;
+  Object.assign(sun.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 25 });
+  scene.add(sun, sun.target);
 
   const players = {};
   const SKEL_EDGES = COCO_EDGES;
@@ -352,7 +427,12 @@ const View3D = (() => {
       const col = ln.kind === 'edge' ? 0xffffff : (ln.surface === 'floor' ? 0xffe27a : 0x8fd0ff);
       g.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: col, transparent: ln.kind === 'edge', opacity: ln.kind === 'edge' ? 0.5 : 1 })));
     }
+    const shade = quad([0, 0, 0.003], [W, 0, 0.003], [W, L, 0.003], [0, L, 0.003], new THREE.ShadowMaterial({ opacity: 0.32, side: THREE.DoubleSide }));
+    shade.geometry.computeVertexNormals();  // the shadow lookup offsets along the normal; without one it is NaN
+    shade.receiveShadow = true; g.add(shade);
     courtGroup = g; scene.add(g);
+    const pl = D.meta.players || {};
+    for (const p of ['A', 'B']) players[p].fig.setLook((pl.look || {})[p] || {}, (pl.racket_hand || {})[p] || 'right');
     preset(new URLSearchParams(location.search).get('view') || 'behind');  // ?view=behind|side|top, handy for screenshots
   }
 
