@@ -59,6 +59,7 @@ async function loadClip(stem) {
   D.t = D.t || new Float64Array(0);
   D.rallies = (meta.rallies || []).map((r, i) => ({ ...r, id: i, label: r.rally ?? i + 1 }));
   D.events = meta.events || [];
+  D.hits = (meta.hits || []).slice().sort((a, b) => a.t - b.t);
   D.bounces = D.events.filter(e => e.source === 'ball');
   D.court = meta.court;
   D.dist = meta.camera_dist || [0, 0, 0, 0, 0];

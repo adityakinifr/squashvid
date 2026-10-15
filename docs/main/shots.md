@@ -5,8 +5,14 @@ No coaching text. Every field says how much is known; the value `unknown` means 
 did not show enough, never a guess.
 
 Code: `squashvid/analysis/shots.py` (per shot), `squashvid/analysis/endings.py` (per rally).
-Run: `python -I -m squashvid.analysis.shots <stem>... | --all` writes
-`work/<stem>/analysis/shots.parquet` and `endings.parquet` and prints coverage and mixes.
+Run: the analysis stage (`python -I -m squashvid.analysis`, and so `squashvid.process`) writes
+`work/<stem>/analysis/shots.parquet` and `endings.parquet` straight after the hits and rallies;
+`python -I -m squashvid.analysis.shots <stem>... | --all` rebuilds them alone and prints coverage and mixes.
+
+`placement()` sums each player's known facts by where the shot was hit from (back, mid, front cell),
+leaving out each rally's first shot; the reports show it as "Where the shots went" (counts of known
+shots only, and nothing coached from it: how a choice of shot worked out is not measured). The
+viewer's timeline readout names the current shot's known facts.
 
 ## Shot table (one row per hit)
 

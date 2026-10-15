@@ -241,6 +241,7 @@ def table_records(df: pd.DataFrame | None, fields=None) -> list[dict]:
     return clean(df[cols].to_dict(orient="records"))
 
 
+SHOT_FACTS = ["shot_type", "direction", "length", "volley"]
 HITTER_MAX_S = 3.0  # a ball event belongs to the latest shot no more than this long before it
 
 
@@ -385,7 +386,11 @@ def export(stem: str, root: Path | None = None, timestamps: np.ndarray | None = 
     sources["audio_events"] = _read(work / "audio_onsets.parquet") is not None
 
     a = work / "analysis"
-    hits = table_records(_read(a / "hits.parquet"))
+    hits_df, shots_df = _read(a / "hits.parquet"), _read(a / "shots.parquet")
+    if hits_df is not None and len(hits_df) and shots_df is not None and len(shots_df):
+        # Where each shot went (analysis/shots.py), for the timeline readout; "unknown" where the ball did not show it.
+        hits_df = hits_df.merge(shots_df[["rally", "shot_index", *SHOT_FACTS]], on=["rally", "shot_index"], how="left")
+    hits = table_records(hits_df)
     stats = _read_json(a / "stats.json")
     insights = _read_json(a / "insights.json")
     report = (a / "report.md").read_text() if (a / "report.md").exists() else None

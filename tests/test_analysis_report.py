@@ -47,3 +47,16 @@ def test_how_rallies_ended_is_shown_only_when_winners_were_inferred():
     text = "\n".join(lines)
     assert "## How rallies ended (inferred)" in text and "2 of 9 rallies have no winner" in text
     assert "| Won when serving | 2 of 4 | 2 of 4 |" in text and "(6 shots or more)" in text
+
+
+def test_where_the_shots_went_is_shown_only_with_known_directions_and_says_how_many():
+    from squashvid.analysis.report import placement_section
+
+    zone = {"n": 3, "direction": {"straight": 2, "cross": 1}, "length": {"deep": 1, "mid": 0, "short": 1}}
+    empty = {"n": 0, "direction": {"straight": 0, "cross": 0}, "length": {"deep": 0, "mid": 0, "short": 0}}
+    p = {"n": 3, "zones": {"back": zone, "mid": empty, "front": empty}, "volley": {"volley": 0, "bounce": 3}, "tight": {"yes": 1, "no": 1}, "shot_type": {"drive": 3, "boast": 0, "drop": 0, "lob": 0, "kill": 0}}
+    assert placement_section(None) == [] and placement_section({"n_shots": 4, "direction_known": 0, "players": {}}) == []
+    text = "\n".join(placement_section({"n_shots": 6, "direction_known": 4, "players": {"A": p, "B": p}}))
+    assert "known for 4 of 6 shots" in text
+    assert "| From the back (behind the service boxes): straight / cross-court | 2 / 1 | 2 / 1 |" in text
+    assert "| From mid-court: straight / cross-court | n/a | n/a |" in text

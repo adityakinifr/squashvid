@@ -110,6 +110,40 @@ def outcomes_section(out: dict | None) -> list[str]:
     return lines + [f"| {label} | {fn('A')} | {fn('B')} |" for label, fn in rows] + [""]
 
 
+def placement_section(pl: dict | None) -> list[str]:
+    """Where the shots went (shots.placement): counts of the shots whose facts the ball tracking showed."""
+    if not pl or not pl.get("direction_known"):
+        return []
+    P = pl["players"]
+
+    def cell(d: dict) -> str:
+        return " / ".join(str(v) for v in d.values()) if sum(d.values()) else "n/a"
+
+    zone_name = {"back": "the back (behind the service boxes)", "mid": "mid-court", "front": "the front (in front of the short line)"}
+    rows = []
+    for z in ("back", "mid", "front"):
+        rows.append((f"From {zone_name[z]}: straight / cross-court", lambda p, z=z: cell(P[p]["zones"][z]["direction"])))
+        if z != "front":
+            rows.append((f"From {zone_name[z]}: deep / middle / short", lambda p, z=z: cell(P[p]["zones"][z]["length"])))
+    rows += [
+        ("Volleys / off the bounce", lambda p: cell(P[p]["volley"])),
+        ("Close to a side wall: yes / no", lambda p: cell(P[p]["tight"])),
+        ("Drives / boasts / drops / lobs / kills", lambda p: cell(P[p]["shot_type"])),
+    ]
+    lines = [
+        "## Where the shots went",
+        "",
+        f"Counts of shots (serves left out) where the ball tracking showed the answer; the direction is known for {pl['direction_known']} of "
+        f"{pl['n_shots']} shots, the rest are not counted. Deep means the first bounce was behind the service box, short in front of the "
+        "short line, middle between. Straight or cross-court is which side of the middle line the ball went to. These describe the shots; "
+        "none of them is coached, because how a choice of shot worked out is not measured here.",
+        "",
+        "| | {A} | {B} |",
+        "|---|---|---|",
+    ]
+    return lines + [f"| {label} | {fn('A')} | {fn('B')} |" for label, fn in rows] + [""]
+
+
 def coaching(ins: dict, nm: dict[str, str], stem: str | None = None) -> list[str]:
     """The layered coaching: a short list per player first, then the evidence for a coach or parent.
 
@@ -163,6 +197,7 @@ def render(stem: str, stats: dict, ins: dict, title: str | None = None, nm: dict
         *[fill(x, nm) for x in stats_table(stats)],
         "",
         *[fill(x, nm) for x in outcomes_section(ins.get("outcomes"))],
+        *[fill(x, nm) for x in placement_section(ins.get("placement"))],
     ]
     if stats.get("ball") and all(p in stats["ball"] for p in PLAYERS):
         lines += [
@@ -191,7 +226,8 @@ def render_pooled(ins: dict, nm: dict[str, str] | None = None) -> str:
     nm = nm or names()
     stems = ins["clip"].split("+")
     head = ["# Match report: all clips together", "", f"{ins['n_rallies']} rallies across {len(stems)} clips ({', '.join(stems)}). The coaching below pools every rally; see each clip's report for its numbers.", ""]
-    return "\n".join(head + coaching(ins, nm) + [fill(x, nm) for x in outcomes_section(ins.get("outcomes"))])
+    tables = outcomes_section(ins.get("outcomes")) + placement_section(ins.get("placement"))
+    return "\n".join(head + coaching(ins, nm) + [fill(x, nm) for x in tables])
 
 
 def clip_report(work: Path, stem: str, nm: dict[str, str] | None = None) -> str | None:
@@ -222,4 +258,4 @@ def rewrite_all(work: Path = WORK) -> list[Path]:
     return out
 
 
-__all__ = ["render", "render_pooled", "coaching", "clip_report", "rewrite_all", "names", "stats_table", "ball_table", "outcomes_section"]
+__all__ = ["render", "render_pooled", "coaching", "clip_report", "rewrite_all", "names", "stats_table", "ball_table", "outcomes_section", "placement_section"]

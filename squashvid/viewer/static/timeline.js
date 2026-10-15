@@ -64,7 +64,8 @@ const Timeline = (() => {
     const x = xOf(V.D.t[f]);
     ctx.fillStyle = '#ff3b3b'; ctx.fillRect(x - 1, 0, 2, H);
     document.getElementById('tl-time').textContent = fmtTime(V.D.t[f]);
-    document.getElementById('tl-frame').textContent = `frame ${f} / ${V.D.n - 1}` + rallyText(rallyAt(V.D, V.D.t[f]));
+    const r = rallyAt(V.D, V.D.t[f]);
+    document.getElementById('tl-frame').textContent = `frame ${f} / ${V.D.n - 1}` + rallyText(r) + shotText(V.D, r, V.D.t[f]);
   }
 
   const seekX = ev => V.seekTo(tOf(ev.clientX - cv.getBoundingClientRect().left));
@@ -83,4 +84,19 @@ function rallyText(r) {
   if (r.server) s += `: ${V.names[r.server]} served${side ? ' from the ' + side : ''}`;
   if (r.winner) s += `, won by ${V.names[r.winner]} (inferred from the next serve)`;
   return s;
+}
+
+// The shot in flight: the rally's latest hit before t, and what the ball tracking showed of where it went.
+function shotText(D, r, t) {
+  if (!r || !D.hits) return '';
+  let h = null;
+  for (const x of D.hits) { if (x.t > t) break; if (x.rally === r.rally) h = x; }
+  if (!h) return '';
+  const known = v => v && v !== 'unknown';
+  const parts = [];
+  if (h.volley === 'volley') parts.push('volley');
+  if (known(h.shot_type)) parts.push(h.shot_type);
+  if (known(h.direction)) parts.push(h.direction === 'cross' ? 'cross-court' : 'straight');
+  if (known(h.length)) parts.push(h.length === 'mid' ? 'middle length' : h.length);
+  return parts.length ? ` · ${V.names[h.hitter]}'s shot: ${parts.join(', ')}` : '';
 }

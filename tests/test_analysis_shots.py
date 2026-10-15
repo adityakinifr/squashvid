@@ -368,3 +368,19 @@ def test_no_ball_events_means_every_rally_is_unclear():
     shots = S.shot_table("X", SPEC, h, rallies(12.4), None)
     e = E.ending_table("X", SPEC, shots, rallies(12.4), None)
     assert e.ending.tolist() == ["unclear"] and e.inferred_winner.tolist() == ["none"]
+
+
+def test_placement_counts_known_facts_by_where_the_shot_was_hit_from_and_leaves_out_serves():
+    rows = [
+        {"rally_first": True, "hitter": "A", "cell_hit_from": "mid-left", "direction": "straight", "length": "deep", "volley": "serve", "tight": "no", "shot_type": "drive"},
+        {"rally_first": False, "hitter": "B", "cell_hit_from": "back-left", "direction": "cross", "length": "short", "volley": "bounce", "tight": "yes", "shot_type": "drive"},
+        {"rally_first": False, "hitter": "B", "cell_hit_from": "back-right", "direction": "unknown", "length": "unknown", "volley": "unknown", "tight": "unknown", "shot_type": "unknown"},
+        {"rally_first": False, "hitter": "A", "cell_hit_from": None, "direction": "straight", "length": "mid", "volley": "volley", "tight": "no", "shot_type": "boast"},
+    ]
+    pl = S.placement(pd.DataFrame(rows))
+    assert pl["n_shots"] == 3 and pl["direction_known"] == 2
+    b = pl["players"]["B"]
+    assert b["n"] == 2 and b["zones"]["back"]["n"] == 2
+    assert b["zones"]["back"]["direction"] == {"straight": 0, "cross": 1} and b["zones"]["back"]["length"] == {"deep": 0, "mid": 0, "short": 1}
+    a = pl["players"]["A"]
+    assert sum(z["n"] for z in a["zones"].values()) == 0 and a["shot_type"]["boast"] == 1  # no cell: counted overall, in no zone

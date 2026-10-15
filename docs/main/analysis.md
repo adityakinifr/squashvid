@@ -2,7 +2,7 @@
 
 Run: `python -I -m squashvid.analysis <stem>|--all [--no-ball] [--no-review] [--pooled]`.
 Evaluate: `python -I -m squashvid.analysis.evaluate`.
-Outputs per clip in `work/<stem>/analysis/`: `rallies.parquet`, `hits.parquet`, `stats.json`, `insights.json`, `report.md`. Pooled outputs in `work/analysis/`. Review plots in `work/analysis_review/`.
+Outputs per clip in `work/<stem>/analysis/`: `rallies.parquet`, `hits.parquet`, `shots.parquet` and `endings.parquet` (see [shots.md](shots.md)), `stats.json`, `insights.json`, `report.md`. Pooled outputs in `work/analysis/`. Review plots in `work/analysis_review/`.
 
 ## What it computes
 - **Hits**: candidates are per-player wrist-speed peaks, audio front-wall onsets with no pose peak, and ball racket events. A Viterbi pass picks a sequence that favours alternating players, front-wall support after the hit, a rival swing, and a still hitter. With ball events present (`work/<stem>/ball_events.parquet`) they are used automatically and hit times snap to the ball's racket event.

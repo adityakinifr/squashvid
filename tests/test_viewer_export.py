@@ -72,6 +72,18 @@ def test_export_reads_optional_inputs(tmp_path):
     assert meta["rallies"][0]["start_t"] == 0.0 and meta["stats"] == {"A": {"shots": 3}}
 
 
+def test_exported_hits_carry_where_each_shot_went(tmp_path):
+    w = tmp_path / "clip"
+    (w / "analysis").mkdir(parents=True)
+    pd.DataFrame({"t": [0.1, 0.2], "hitter": ["A", "B"], "rally": [1, 1], "shot_index": [1, 2]}).to_parquet(w / "analysis" / "hits.parquet")
+    pd.DataFrame({"rally": [1], "shot_index": [2], "shot_type": ["drive"], "direction": ["cross"], "length": ["short"], "volley": ["bounce"], "fw_z": [1.2]}).to_parquet(
+        w / "analysis" / "shots.parquet")
+    X.export("clip", root=tmp_path, timestamps=VFR)
+    hits = json.loads((w / "viewer" / "meta.json").read_text())["hits"]
+    assert [h.get("direction") for h in hits] == [None, "cross"] and hits[1]["shot_type"] == "drive"
+    assert "fw_z" not in hits[1]  # only the facts the readout shows
+
+
 def test_court_geometry_matches_court_module():
     spec = court.WSF.with_(width=6.15, box_width=1.61)
     payload = X.court_payload(spec)

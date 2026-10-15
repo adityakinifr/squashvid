@@ -9,6 +9,7 @@ import pandas as pd
 
 from squashvid.analysis import hits as H
 from squashvid.analysis import rallies as R
+from squashvid.analysis import shots as SH
 from squashvid.analysis import stats as S
 from squashvid.analysis.io import PLAYERS, Match, load, out_dir
 from squashvid.analysis.posture import hip_drop
@@ -39,6 +40,7 @@ def run(stem: str, use_ball: bool = True, review: bool = True, insights: bool = 
     m = load(stem, use_ball=use_ball)
     rallies, hits, ev = detect(m)
     write_tables(m, rallies, hits)
+    shots, _ = SH.run(stem)  # reads the tables just written
     stats = S.write(m, hits, rallies)
     summary = {"clip": stem, "ball_events": m.ball_events is not None, "rallies": len(rallies), "hits": len(hits)}
     if review:
@@ -50,6 +52,7 @@ def run(stem: str, use_ball: bool = True, review: bool = True, insights: bool = 
         from squashvid.analysis import report as P
 
         ins = I.build(m, hits, rallies, stats)
+        ins["placement"] = SH.placement(shots)
         (out_dir(stem) / "insights.json").write_text(json.dumps(ins, indent=1))
         (out_dir(stem) / "report.md").write_text(P.render(stem, stats, ins))
     log.info("%s", summary)
@@ -67,12 +70,14 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
     from squashvid.analysis.io import WORK
     from squashvid.analysis.serves import outcomes
 
-    parts, m0 = [], None
+    parts, shots, m0 = [], [], None
     for i, stem in enumerate(stems):
         m = load(stem, use_ball=use_ball)
         r = pd.read_parquet(out_dir(stem) / "rallies.parquet")
         h = pd.read_parquet(out_dir(stem) / "hits.parquet")
         parts.append(I.Facts.from_match(m, h, r, offset=I.RALLY_BLOCK * (i + 1), ball=I.ball_table(m, h)))
+        if (out_dir(stem) / "shots.parquet").exists():
+            shots.append(pd.read_parquet(out_dir(stem) / "shots.parquet"))
         m0 = m0 or m
     facts = I.Facts.concat(parts)
     all_c = I.generate(facts, m0.T, with_suppressed=True)
@@ -82,6 +87,7 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
         "editor": "coach",
         "n_rallies": int(facts.rallies.rally.nunique()),
         "outcomes": outcomes(facts.rallies, facts.hits),
+        "placement": SH.placement(pd.concat(shots, ignore_index=True)) if shots else None,
         "players": players,
         "candidates": [I._pub_c(c) for c in all_c],
         "rejected_sentences": rejected,

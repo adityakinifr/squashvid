@@ -31,7 +31,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from squashvid.analysis.io import CLIPS, out_dir, work_dir
+from squashvid.analysis.io import CLIPS, PLAYERS, out_dir, work_dir
 from squashvid.analysis.stats import front_wall_band
 from squashvid.geom.court import CourtSpec
 
@@ -341,6 +341,31 @@ def coverage(shots: pd.DataFrame) -> dict:
     }
     mix = {p: g.shot_type.value_counts().to_dict() for p, g in shots.groupby("hitter")}
     return {"coverage": cov, "shot_type_mix": mix}
+
+
+ZONES = ("back", "mid", "front")
+
+
+def _counts(col: pd.Series, keys: tuple[str, ...]) -> dict[str, int]:
+    return {k: int((col == k).sum()) for k in keys}
+
+
+def placement(shots: pd.DataFrame) -> dict:
+    """Where each player's shots went, by the part of the court they were hit from (the cell's back/mid/front):
+    counts of known facts only, so a reader sees "of how many". Each rally's first shot (the serve) is left out."""
+    s = shots[~shots.rally_first.astype(bool)] if len(shots) else shots
+    out: dict = {"n_shots": int(len(s)), "direction_known": int((s.direction != UNKNOWN).sum()) if len(s) else 0, "players": {}}
+    for p in PLAYERS:
+        mine = s[s.hitter == p] if len(s) else s
+        zone = mine.cell_hit_from.fillna("").str.split("-").str[0] if len(mine) else pd.Series(dtype=str)
+        out["players"][p] = {
+            "n": int(len(mine)),
+            "zones": {z: {"n": int((zone == z).sum()), "direction": _counts(mine.direction[zone == z], ("straight", "cross")), "length": _counts(mine.length[zone == z], ("deep", "mid", "short"))} for z in ZONES},
+            "volley": _counts(mine.volley, ("volley", "bounce")),
+            "tight": _counts(mine.tight, ("yes", "no")),
+            "shot_type": _counts(mine.shot_type, ("drive", "boast", "drop", "lob", "kill")),
+        }
+    return out
 
 
 def run(stem: str) -> tuple[pd.DataFrame, pd.DataFrame]:
