@@ -145,5 +145,15 @@ def create_app(work=None):
         tmp.replace(settings_path)
         return data
 
-    app.mount("/static", __import__("fastapi.staticfiles", fromlist=["StaticFiles"]).StaticFiles(directory=STATIC), name="static")
+    from fastapi.staticfiles import StaticFiles
+
+    class FreshStatic(StaticFiles):
+        """The UI is edited in place, so the browser revalidates instead of running a stale script."""
+
+        def file_response(self, *args, **kwargs):
+            resp = super().file_response(*args, **kwargs)
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    app.mount("/static", FreshStatic(directory=STATIC), name="static")
     return app

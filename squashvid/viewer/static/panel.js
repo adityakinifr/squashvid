@@ -30,7 +30,7 @@ const Panel = (() => {
     if (kids.length >= 2 && kids.length === keys.length && kids.some(k => playerKey(k))) {
       const rows = [...new Set(kids.flatMap(k => Object.keys(o[k])))];
       return `<table class="kv"><tr><th></th>${kids.map(k => `<th>${label(k)}</th>`).join('')}</tr>` +
-        rows.map(r => `<tr><td>${nice(r)}</td>${kids.map(k => `<td>${isObj(o[k][r]) || Array.isArray(o[k][r]) ? '…' : (o[k][r] == null ? '' : num(o[k][r]))}</td>`).join('')}</tr>`).join('') + '</table>';
+        rows.map(r => `<tr><td>${nice(r)}</td>${kids.map(k => `<td>${isObj(o[k][r]) && 'value' in o[k][r] ? meas(o[k][r]) : isObj(o[k][r]) || Array.isArray(o[k][r]) ? '…' : (o[k][r] == null ? '' : num(o[k][r]))}</td>`).join('')}</tr>`).join('') + '</table>';
     }
     let scal = '', rest = '';
     for (const k of keys) {
@@ -76,9 +76,52 @@ const Panel = (() => {
     return out;
   }
 
+  // A {value, ci, n} measurement as "value (lo–hi)"; pct scales shares to percentages.
+  function meas(m, pct = false, dec = 1) {
+    if (m == null) return '';
+    const v = isObj(m) ? m.value : m;
+    if (v == null || !Number.isFinite(v)) return '';
+    const f = x => (pct ? (100 * x).toFixed(0) + '%' : x.toFixed(dec));
+    const ci = isObj(m) && Array.isArray(m.ci) && m.ci.length === 2 ? ` <span class="ci">(${f(m.ci[0])}–${f(m.ci[1])})</span>` : '';
+    return f(v) + ci;
+  }
+  const at = (o, path) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+
+  // The headline table, in the same order and wording as the match report.
+  function curated(S) {
+    const P = S.players || {};
+    const rows = [
+      ['Shots hit', p => String(at(P[p], 'shots') ?? '')],
+      ['Distance from the T, average (m)', p => meas(at(P[p], 'mean_dist_from_T_m'))],
+      ['Distance from the T when the opponent hits (m)', p => meas(at(P[p], 'mean_dist_from_T_at_opponent_strike_m'))],
+      [`Time within ${at(S, 'params.t_radius_m') ?? 1} m of the T`, p => meas(at(P[p], 'share_within_T_radius'), true)],
+      ['Time in front of the short line', p => meas(at(P[p], 'share_in_front_of_short_line'), true)],
+      ['Time available per shot, median (s)', p => meas(at(P[p], 'available_time_s.median'))],
+      ['Shots with under 1.1 s to play them', p => meas(at(P[p], 'available_time_s')?.['share_under_1.1s'], true)],
+      ['Back near the T before the next shot', p => meas(at(P[p], 'recovery_to_T.share_back_on_T_before_next_hit'), true)],
+      ['Distance run in rallies (m)', p => meas(at(P[p], 'distance_covered_in_play_m'), false, 0)],
+    ];
+    const sit = ['defence', 'maintain', 'pressing', 'pressure', 'attack', 'attempted_winner'];
+    for (const k of sit) rows.push([`Shots in “${k.replace('_', ' ')}” situations`, p => meas(at(P[p], `situations.shares.${k}.share`), true)]);
+    const B = S.ball;
+    if (B && (B.A || B.B)) {
+      rows.push(['Front-wall hits measured', p => String(at(B[p], 'n_shots_with_front_wall') ?? '')]);
+      for (const [k, txt] of [['tin_to_service_line', 'tin to service line'], ['service_line_to_2.5m', 'service line to 2.5 m'], ['above_2.5m', 'above 2.5 m']])
+        rows.push([`Front-wall height: ${txt}`, p => meas(at(B[p], 'band')?.[k], true)]);
+      rows.push(['Within ~20 cm of the tin', p => meas(at(B[p], 'near_tin_share'), true)]);
+      for (const k of ['left', 'centre', 'right']) rows.push([`Front-wall width: ${k} third`, p => meas(at(B[p], 'third')?.[k], true)]);
+    }
+    const m = S.match || {};
+    const head = `<table class="kv"><tr><td>rallies</td><td>${m.rallies ?? ''}</td></tr><tr><td>shots</td><td>${m.shots_total ?? ''}</td></tr>` +
+      `<tr><td>typical rally</td><td>${m.rally_shots?.median ?? ''} shots, ${m.rally_seconds?.median ?? ''} s</td></tr></table>`;
+    const body = rows.map(([lab, fn]) => `<tr><td>${esc(lab)}</td>${['A', 'B'].map(p => `<td>${fn(p)}</td>`).join('')}</tr>`).join('');
+    return head + `<table class="kv"><tr><th></th>${['A', 'B'].map(p => `<th>${label(p)}</th>`).join('')}</tr>${body}</table>` +
+      '<div class="note">Ranges are 90% intervals over rallies. Distance run does not tell you who plays better.</div>';
+  }
+
   function statsHtml(D) {
     let h = '';
-    if (D.meta.stats) h += `<h4>Analysis</h4>${renderObj(D.meta.stats)}`;
+    if (D.meta.stats) h += `<h4>This clip</h4>${curated(D.meta.stats)}<details><summary>All analysis fields</summary>${renderObj(D.meta.stats)}</details>`;
     else h += '<div class="note">No analysis/stats.json yet.</div>';
     h += `<h4>Tracking summary</h4><div class="note">Computed here from the tracked positions during audio-detected rallies.</div>${renderObj(tracked(D))}`;
     const lens = D.rallies.map(r => r.end_t - r.start_t);

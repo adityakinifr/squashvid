@@ -29,6 +29,7 @@ import pandas as pd
 
 from squashvid.analysis.hits import RECOVERY_RADIUS_M, T_RADIUS_M
 from squashvid.analysis.io import PLAYERS, Match, other
+from squashvid.analysis.stats import dist_from_T_by_rally
 
 MIN_RALLIES = 8
 N_BOOT = 600
@@ -148,7 +149,7 @@ class Facts:
 
     hits: pd.DataFrame  # clip, rally (unique), t, hitter, opp/hitter positions, available_time, recovery...
     rallies: pd.DataFrame  # clip, rally (unique), start_t, end_t
-    series: dict = field(default_factory=dict)  # rally -> {"A": dist-from-T array (10 Hz), "B": ...}
+    series: dict = field(default_factory=dict)  # rally -> {"A": stats.dist_from_T_by_rally samples, "B": ...}
     ball: pd.DataFrame | None = None  # per shot with a front-wall impact: clip, rally, hitter, z, x, bounce_y, t
     t_radius: float = T_RADIUS_M
     short_s: float = SHORT_AVAILABLE_S
@@ -161,11 +162,8 @@ class Facts:
         r = rallies.copy()
         r.insert(0, "clip", m.stem)
         r["rally"] = r.rally + offset
-        step = max(int(round(m.fps / 10)), 1)
-        series = {}
-        for row in r.itertuples():
-            a, b = m.frame_at(row.start_t), m.frame_at(row.end_t)
-            series[row.rally] = {k: np.hypot(m.tracks[k].x[a : b + 1 : step] - m.T[0], m.tracks[k].y[a : b + 1 : step] - m.T[1]) for k in PLAYERS}
+        per_player = {k: dist_from_T_by_rally(m, k, rallies) for k in PLAYERS}
+        series = {rid: {k: per_player[k][i] for k in PLAYERS} for i, rid in enumerate(r.rally)}
         if ball is not None:
             ball = ball.copy()
             ball.insert(0, "clip", m.stem)
@@ -302,14 +300,16 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
             c["suppressed"] = suppress(c)
             cands.append(c)
 
-    # Position metrics from the 10 Hz distance-from-T series of each rally.
+    # Position metrics from the same distance-from-T samples as stats.py, so the report's table and its findings agree.
     def series_fn(metric):
         def fn(d, q):
             arrs = [facts.series[r][q] for r in d.rally.unique() if r in facts.series]
             if not arrs:
                 return np.nan
             v = np.concatenate(arrs)
-            return float(np.nanmean(v)) if metric == "t_overall" else float(np.nanmean(v <= facts.t_radius))
+            if not len(v):
+                return np.nan
+            return float(np.mean(v)) if metric == "t_overall" else float(np.mean(v <= facts.t_radius))
 
         return fn
 
@@ -319,8 +319,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         for p in PLAYERS:
             o = other(p)
             res = cluster_bootstrap(_by_rally(rr), lambda d, p=p, o=o, fn=fn: fn(d, p) - fn(d, o))
-            n = int(sum(len(facts.series[r][p]) for r in rr.rally if r in facts.series))
-            c = _candidate(p, "vs_opponent", metric, "vs opponent", fn(rr, p), fn(rr, o), res, int(round(n / 10)), res["n_rallies"], n_label="seconds of play")
+            seconds = int(round(float((rr.end_t - rr.start_t).sum())))
+            c = _candidate(p, "vs_opponent", metric, "vs opponent", fn(rr, p), fn(rr, o), res, seconds, res["n_rallies"], n_label="seconds of play")
             per = rr.copy()
             per["pick"] = [fn(rr[rr.rally == r], p) for r in rr.rally]
             ev = []
@@ -359,7 +359,7 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
             res = _two_sample(ge, gl, lambda d, fn=fn, p=p: fn(d, p))
             late_h = h[h.rally.isin(late_ids)]
             c = _candidate(p, "early_vs_late", metric, "late half vs early half", fn(late_h, p), fn(h[h.rally.isin(early_ids)], p), res, int(len(rows_fn(late_h, p))), min(len(ge), len(gl)))
-            pool = h[h.rally.isin(late_ids if not c["favourable"] else early_ids)]
+            pool = h[h.rally.isin(late_ids)]  # the later rallies show the change: best examples if it improved, worst if not
             c["evidence"] = _windows(_order(rows_fn(pool, p), c["favourable"], METRICS[metric]["better"] == "lower"), label_fn=lambda r, p=p, label=label: label(r, p))
             c["suppressed"] = suppress(c)
             cands.append(c)
@@ -463,7 +463,7 @@ def _phrase(c: dict) -> list[str]:
     unit = METRICS[metric]["unit"]
     u = {"%": "%", "m": " m", "s": " s"}[unit]
     pu = " percentage points" if unit == "%" else u
-    size = f"The difference is about {d['diff']}{pu}, probably between {d['diff_lo']}{pu} and {d['diff_hi']}{pu}"
+    size = f"The difference is about {d['diff']}{pu}, probably between {d['diff_lo']} and {d['diff_hi']}{pu}"
     base = f"({d['n_rallies']} rallies, {d['n']} {c.get('n_label', 'shots')}). {size}."
     if gen == "short_vs_long":
         return [f"After shots hit with less than {d['split']} s since the opponent's shot, {p} was back near the T before the next ball {d['value']}% of the time, against {d['comparison']}% after shots with more time {base}"]

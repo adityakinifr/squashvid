@@ -67,3 +67,6 @@ table.kv th { font-weight: 600; color: var(--fg); }
 #time-readout { font-variant-numeric: tabular-nums; font-size: 12px; flex: none; }
 #timeline { flex: 1; min-height: 0; width: 100%; cursor: pointer; }
 .empty { color: var(--muted); padding: 16px 4px; }
+
+.ci { color: #888; font-size: 0.85em; white-space: nowrap; }
+details > summary { cursor: pointer; color: #666; margin: 10px 0 4px; font-size: 12px; }

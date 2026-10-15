@@ -97,3 +97,10 @@ def test_compare_pts_flags_missing_and_shifted_frames():
     # a constant offset (audio would drift against it) is caught
     assert not compare_pts(orig + 0.05, orig)["ok"]
     assert not compare_pts(np.concatenate([orig, [9.0]]), orig)["ok"]
+
+
+def test_ball_events_take_the_hitter_of_the_preceding_shot():
+    hits = pd.DataFrame({"t": [10.0, 11.4, 30.0], "hitter": ["A", "B", "A"]})
+    events = [{"t": 10.6, "kind": "front_wall"}, {"t": 12.0, "kind": "floor"}, {"t": 20.0, "kind": "floor"}, {"t": 9.0, "kind": "front_wall"}]
+    X.attribute_hitters(events, hits, max_s=3.0)
+    assert [e.get("hitter") for e in events] == ["A", "B", None, None]  # too long after a shot, or before any shot: unattributed

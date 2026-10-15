@@ -118,6 +118,17 @@ def time_in_play_series(m: Match, player: str, rallies: pd.DataFrame, fn) -> lis
     return out
 
 
+def dist_from_T_by_rally(m: Match, player: str, rallies: pd.DataFrame) -> list[np.ndarray]:
+    """The player's distance from the T (m) at every frame of each rally where the position is known."""
+    tr = m.tracks[player]
+    out = []
+    for r in rallies.itertuples():
+        a, b = m.frame_at(r.start_t), m.frame_at(r.end_t)
+        d = np.hypot(tr.x[a : b + 1] - m.T[0], tr.y[a : b + 1] - m.T[1])
+        out.append(d[np.isfinite(d)])
+    return out
+
+
 def player_stats(m: Match, h: pd.DataFrame, rallies: pd.DataFrame, player: str, t_radius: float = T_RADIUS_M) -> dict:
     opp = other(player)
     mask = play_mask(m, rallies)
@@ -130,8 +141,9 @@ def player_stats(m: Match, h: pd.DataFrame, rallies: pd.DataFrame, player: str, 
     def seg(fn):
         return [fn(dT[m.frame_at(r.start_t) : m.frame_at(r.end_t) + 1], m.frame_at(r.start_t), m.frame_at(r.end_t)) for r in rallies.itertuples()]
 
-    mean_dT = bootstrap_ci([x for x in seg(lambda d, a, b: d[np.isfinite(d)])])
-    share_T = bootstrap_ci(seg(lambda d, a, b: (d[np.isfinite(d)] <= t_radius).astype(float)))
+    by_rally = dist_from_T_by_rally(m, player, rallies)
+    mean_dT = bootstrap_ci(by_rally)
+    share_T = bootstrap_ci([(d <= t_radius).astype(float) for d in by_rally])
     front = bootstrap_ci(seg(lambda d, a, b: (tr.y[a : b + 1][np.isfinite(tr.y[a : b + 1])] > m.spec.short_y).astype(float)))
     # T distance at the opponent's strike: this player's distance when the opponent hits.
     by_opp = h[h.hitter == opp]

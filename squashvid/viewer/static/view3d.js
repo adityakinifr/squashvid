@@ -3,7 +3,15 @@
 const View3D = (() => {
   const host = document.getElementById('three');
   const hud = document.getElementById('three-hud');
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+  } catch (err) {
+    // Without WebGL only this pane is lost; the video, 2D views and stats keep working.
+    console.warn('3D view disabled:', err);
+    hud.textContent = '3D view needs WebGL, which this browser has turned off.';
+    return { buildCourt() {}, update() {}, preset() {} };
+  }
   renderer.setPixelRatio(window.devicePixelRatio || 1);
   host.appendChild(renderer.domElement);
   const scene = new THREE.Scene();

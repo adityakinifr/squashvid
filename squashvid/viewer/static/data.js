@@ -128,7 +128,8 @@ function liftKeypoint(cam, floorXY, u, v) {
 }
 
 function fmtTime(t) {
-  const m = Math.floor(t / 60), s = t - m * 60;
+  const cs = Math.round(Math.max(t, 0) * 100);  // round once, so 119.999 s reads 2:00.00, not 1:60.00
+  const m = Math.floor(cs / 6000), s = (cs - m * 6000) / 100;
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
 }
 

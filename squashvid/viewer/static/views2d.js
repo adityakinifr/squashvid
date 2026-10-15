@@ -4,7 +4,7 @@ const RALLY_PALETTE = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#
 
 function eventColor(e, mode) {
   if (mode === 'rally') { const r = e._rally; return r == null ? '#999' : RALLY_PALETTE[((r % RALLY_PALETTE.length) + RALLY_PALETTE.length) % RALLY_PALETTE.length]; }
-  return V.COLORS[e.player] || '#bbbbbb';
+  return V.COLORS[e.hitter || e.player] || '#bbbbbb';  // impacts take the hitter of the preceding shot
 }
 
 function annotateEvents(D) {
@@ -119,7 +119,7 @@ const FrontView = (() => {
   function build(D) {
     const s = D.court.spec, d = D.court.derived; W = s.width; H = d.front_out_z + 0.45;
     svg.selectAll('*').remove();
-    svg.attr('viewBox', `${-0.5} ${-0.3} ${W + 1} ${H + 0.7}`);
+    svg.attr('viewBox', `${-0.5} ${-0.3} ${W + 1.6} ${H + 0.7}`);
     g = svg.append('g');
     g.append('rect').attr('x', 0).attr('y', Y(d.front_out_z)).attr('width', W).attr('height', d.front_out_z).attr('fill', '#6fa8dc').attr('fill-opacity', 0.14).attr('stroke', '#fff').attr('stroke-width', 0.03);
     g.append('rect').attr('x', 0).attr('y', Y(s.tin_top)).attr('width', W).attr('height', s.tin_top).attr('fill', '#d9534f').attr('fill-opacity', 0.35);

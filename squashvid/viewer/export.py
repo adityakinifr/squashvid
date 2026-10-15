@@ -223,20 +223,39 @@ def table_records(df: pd.DataFrame | None, fields=None) -> list[dict]:
     return clean(df[cols].to_dict(orient="records"))
 
 
+HITTER_MAX_S = 3.0  # a ball event belongs to the latest shot no more than this long before it
+
+
+def attribute_hitters(events: list[dict], hits: pd.DataFrame | None, max_s: float = HITTER_MAX_S) -> None:
+    """Set `hitter` on each ball event to the player whose shot most recently preceded it, as the analysis stage does."""
+    if hits is None or not len(hits) or "hitter" not in hits:
+        return
+    h = hits.dropna(subset=["t"]).sort_values("t")
+    ht, who = h["t"].to_numpy(float), h["hitter"].to_numpy()
+    for e in events:
+        if e.get("t") is None:
+            continue
+        i = int(np.searchsorted(ht, e["t"], side="right")) - 1
+        if i >= 0 and e["t"] - ht[i] <= max_s and isinstance(who[i], str):
+            e["hitter"] = who[i]
+
+
 def load_events(work: Path, ts: np.ndarray) -> list[dict]:
     ev = _read(work / "ball_events.parquet")
+    hits = _read(work / "analysis" / "hits.parquet")
     out = []
     for r in table_records(ev, EVENT_FIELDS):
         r.setdefault("source", "ball")
         if r.get("frame") is None and r.get("t") is not None:
             r["frame"] = int(frame_of_time(ts, r["t"]))
         out.append(r)
+    attribute_hitters(out, hits)
     on = _read(work / "audio_onsets.parquet")
     if on is not None and len(on):
         on = on[on["kind"].isin(AUDIO_KINDS)]
         for t, kind, rally in zip(on["t_peak"] if "t_peak" in on else on["t"], on["kind"], on.get("rally", [None] * len(on)), strict=False):
             out.append({"t": float(t), "frame": int(frame_of_time(ts, t)), "kind": f"audio_{kind}", "source": "audio", "rally": clean(rally)})
-    for r in table_records(_read(work / "analysis" / "hits.parquet"), ("t", "frame", "hitter", "rally", "shot_index", "situation")):
+    for r in table_records(hits, ("t", "frame", "hitter", "rally", "shot_index", "situation")):
         if r.get("t") is not None:
             out.append({"t": r["t"], "frame": int(frame_of_time(ts, r["t"])), "kind": "hit", "source": "hits", "player": r.get("hitter"),
                         "rally": r.get("rally"), "shot_index": r.get("shot_index")})

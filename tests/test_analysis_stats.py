@@ -1,6 +1,7 @@
 """The bootstrap interval over rallies and the suppression rule."""
 
 import numpy as np
+import pandas as pd
 
 from squashvid.analysis import insights as I
 from squashvid.analysis import stats as S
@@ -51,3 +52,30 @@ def test_suppression_rule():
     assert I.suppress({**ok, "n_rallies": 7}) is not None  # too few rallies
     assert I.suppress({**ok, "ci": None}) is not None
     assert I.suppress({**ok, "n_rallies": 7}, min_rallies=5) is None
+
+
+def _stub_match(n=300, fps=30.0, seed=0):
+    from squashvid.analysis.io import Match, Track
+    from squashvid.geom.court import CourtSpec
+
+    rng = np.random.default_rng(seed)
+    spec = CourtSpec()
+    tracks = {}
+    for k in "AB":
+        x, y = rng.uniform(0.5, spec.width - 0.5, n), rng.uniform(1.0, 8.0, n)
+        x[rng.random(n) < 0.2] = np.nan  # frames where the player was not seen
+        z = np.zeros(n)
+        tracks[k] = Track(x, y, z, np.isfinite(x), z, z)
+    return Match("stub", spec, np.arange(n) / fps, fps, tracks, pd.DataFrame(columns=["t", "kind"]), pd.DataFrame())
+
+
+def test_findings_and_table_read_the_same_distance_from_T_samples():
+    m = _stub_match()
+    rallies = pd.DataFrame({"rally": [1, 2], "start_t": [0.5, 5.0], "end_t": [4.0, 9.5]})
+    hits = pd.DataFrame({"rally": pd.Series(dtype=int), "t": pd.Series(dtype=float)})
+    facts = I.Facts.from_match(m, hits, rallies)
+    for k in "AB":
+        table = S.dist_from_T_by_rally(m, k, rallies)
+        assert all(np.isfinite(d).all() for d in table)  # an unseen frame is unknown, not counted as away from the T
+        for rid, d in zip(rallies.rally, table):
+            np.testing.assert_array_equal(facts.series[rid][k], d)
