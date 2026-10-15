@@ -6,20 +6,22 @@
    value, a comparison, n, a 90% bootstrap interval over rallies and 2-3 evidence
    clips. A candidate is suppressed when its interval crosses zero or it rests on
    fewer than MIN_RALLIES rallies.
-3. Editor: picks at most three strengths and three things to work on per player and
-   phrases them. The deterministic templated editor always runs; an LLM editor runs
-   only when ANTHROPIC_API_KEY is already set in the environment.
+   Situational generators compare a player with themself (how often the next shot was
+   rushed when they were far from the T, against near it) so the coaching can say what a
+   habit cost. A candidate smaller than its metric's `min_effect` is suppressed as too
+   small to matter, however sure the interval.
+3. Editor: squashvid.analysis.coach groups candidates into themes and writes the coaching.
 4. Verifier: rejects any sentence whose numbers or timestamps are not in the candidates it
    cites, any sentence that cites nothing, and any banned claim (technique, won/lost,
    comparison to elite norms).
+
+Players appear in text as {A} and {B} (see `tok`); coach.fill puts in the saved names.
 
 No win/loss claims are made: who won each rally is not known.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -34,9 +36,7 @@ from squashvid.analysis.stats import dist_from_T_by_rally
 MIN_RALLIES = 8
 N_BOOT = 600
 ALPHA = 0.10
-MAX_PER_KIND = 3
 SHORT_AVAILABLE_S = 1.1
-LLM_MODEL = "claude-sonnet-5-5"
 
 # --- verifier ---------------------------------------------------------------------------------
 
@@ -142,6 +142,18 @@ def suppress(c: dict, min_rallies: int = MIN_RALLIES) -> str | None:
 
 # --- facts ------------------------------------------------------------------------------------
 
+# Pooled facts shift each clip's rally ids by a multiple of RALLY_BLOCK to keep them unique; labels show the clip's own number.
+RALLY_BLOCK = 1000
+
+
+def rally_no(rally) -> int:
+    return int(rally) % RALLY_BLOCK
+
+
+def tok(player: str) -> str:
+    """How generated text names a player; coach.fill swaps in the saved name."""
+    return "{" + player + "}"
+
 
 @dataclass
 class Facts:
@@ -184,25 +196,20 @@ class Facts:
 
 # --- candidate generators ---------------------------------------------------------------------
 
+# min_effect: the smallest difference worth coaching. A 0.2 m gap in average distance from the T can be certain and still
+# mean nothing on court, so findings below these sizes are dropped whatever their interval.
 METRICS = {
-    "t_at_strike": {"unit": "m", "better": "lower", "what": "how far from the T you are when your opponent hits", "dec": 1},
-    "t_overall": {"unit": "m", "better": "lower", "what": "how far from the T you are during rallies", "dec": 1},
-    "t_share": {"unit": "%", "better": "higher", "what": "how much of each rally you spend within about one metre of the T", "dec": 0, "scale": 100},
-    "recovered": {"unit": "%", "better": "higher", "what": "how often you are back near the T before the next shot", "dec": 0, "scale": 100},
-    "time_given": {"unit": "s", "better": "lower", "what": "how little time your shots leave your opponent", "dec": 2},
-    "deep_bounce": {"unit": "%", "better": "higher", "what": "how often your shots first bounce in the back of the court", "dec": 0, "scale": 100},
+    "t_at_strike": {"unit": "m", "better": "lower", "what": "how far from the T you are when your opponent hits", "dec": 1, "min_effect": 0.3},
+    "t_overall": {"unit": "m", "better": "lower", "what": "how far from the T you are during rallies", "dec": 1, "min_effect": 0.3},
+    "t_share": {"unit": "%", "better": "higher", "what": "how much of each rally you spend within about one metre of the T", "dec": 0, "scale": 100, "min_effect": 0.08},
+    "recovered": {"unit": "%", "better": "higher", "what": "how often you are back near the T before the next shot", "dec": 0, "scale": 100, "min_effect": 0.08},
+    "time_given": {"unit": "s", "better": "lower", "what": "how little time your shots leave your opponent", "dec": 2, "min_effect": 0.1},
+    "deep_bounce": {"unit": "%", "better": "higher", "what": "how often your shots first bounce in the back of the court", "dec": 0, "scale": 100, "min_effect": 0.1},
+    "recover_from_back": {"unit": "%", "better": "higher", "what": "getting back to the T after a shot from the back of the court", "dec": 0, "scale": 100, "min_effect": 0.1},
+    "off_T_cost": {"unit": "%", "better": "lower", "what": "how often your next shot is rushed when you are far from the T as your opponent hits", "dec": 0, "scale": 100, "min_effect": 0.1},
 }
-
-COACHING = {
-    "t_at_strike": ("Be back near the T before they hit.", "Ghosting: move to a corner, play an imaginary shot, then get back to the T and stop before the next call."),
-    "t_overall": ("After every shot, take your first step back towards the middle.", "Hit and recover: play a shot, then touch the T with your foot before the next ball."),
-    "t_share": ("Hit, then straight back to the T.", "Solo ghosting around the T: eight corners, always finishing on the T."),
-    "recovered": ("Hit, then straight back to the T.", "Pressure ghosting: a partner calls corners quickly and you finish each one on the T."),
-    "time_given": ("Hit early and deep so they have less time.", "Boast and drive: hit to the back, move up early to volley the reply, and keep the pace."),
-    "deep_bounce": ("Aim for the back corners.", "Length drill: hit rails and see how many bounce behind the back of the service box."),
-    "early_late": ("Keep your feet moving in the last minutes.", "Finish every practice with a minute of ghosting at full effort."),
-    "short_time": ("When you are rushed, still get back to the T.", "Rushed-shot recovery: a partner feeds quick balls and you reset to the T after each one."),
-}
+FAR_FROM_T_M = 2.0  # "far from the T" at the opponent's strike, for off_T_cost
+RUSHED = ("defence", "pressure")  # hits.SITUATION_RULES classes with under about 1.1 s, or stretched
 
 
 def _f(x: float, dec: int, scale: float = 1.0) -> str:
@@ -230,7 +237,7 @@ def _windows(rows: pd.DataFrame, k: int = 3, pad: float = 1.5, label_fn=None) ->
     for r in rows.itertuples():
         if any(e["clip"] == r.clip and abs(e["t0"] + pad - r.t) < 8 for e in out):
             continue
-        out.append({"clip": r.clip, "t0": round(max(r.t - pad, 0), 2), "t1": round(r.t + pad, 2), "label": label_fn(r) if label_fn else f"rally {r.rally}"})
+        out.append({"clip": r.clip, "t0": round(max(r.t - pad, 0), 2), "t1": round(r.t + pad, 2), "label": label_fn(r) if label_fn else f"rally {rally_no(r.rally)}"})
         if len(out) == k:
             break
     return out
@@ -285,8 +292,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         return g
 
     hit_metrics = {
-        "t_at_strike": (strike_fn, strike_rows, lambda r, q: f"rally {r.rally}: {q} was {r.pick:.1f} m from the T when {other(q)} hit"),
-        "recovered": (recovered_fn, recovered_rows, lambda r, q: f"rally {r.rally}: {q} {'got back to the T' if r.pick > 5 else 'did not get back to the T'} before the next shot"),
+        "t_at_strike": (strike_fn, strike_rows, lambda r, q: f"rally {rally_no(r.rally)}: {tok(q)} was {r.pick:.1f} m from the T when {tok(other(q))} hit"),
+        "recovered": (recovered_fn, recovered_rows, lambda r, q: f"rally {rally_no(r.rally)}: {tok(q)} {'got back to the T' if r.pick > 5 else 'did not get back to the T'} before the next shot"),
     }
     for metric, (fn, rows_fn, label) in hit_metrics.items():
         better_lower = METRICS[metric]["better"] == "lower"
@@ -328,8 +335,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
                     break
                 if any(e["clip"] == r.clip and abs(e["t0"] - r.start_t) < 8 for e in ev):
                     continue
-                shown = f"{r.pick * 100:.0f}% of the time within 1 m of the T" if metric == "t_share" else f"{r.pick:.1f} m from the T on average"
-                ev.append({"clip": r.clip, "t0": round(r.start_t, 2), "t1": round(min(r.end_t, r.start_t + 8), 2), "label": f"rally {r.rally}: {p} {shown}"})
+                shown = f"was within 1 m of the T for {r.pick * 100:.0f}% of the rally" if metric == "t_share" else f"was {r.pick:.1f} m from the T on average"
+                ev.append({"clip": r.clip, "t0": round(r.start_t, 2), "t1": round(min(r.end_t, r.start_t + 8), 2), "label": f"rally {rally_no(r.rally)}: {tok(p)} {shown}"})
             c["evidence"] = ev
             c["suppressed"] = suppress(c)
             cands.append(c)
@@ -347,7 +354,7 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         rows = h[(h.hitter == o) & h.available_time.notna()].copy()
         c = _candidate(p, "vs_opponent", "time_given", "time given to the opponent vs time received", given, recv, res, int(len(rows)), res["n_rallies"])
         rows["pick"] = rows.available_time
-        c["evidence"] = _windows(_order(rows, c["favourable"], True), label_fn=lambda r, p=p: f"rally {r.rally}: {r.pick:.1f} s between {p}'s shot and the reply")
+        c["evidence"] = _windows(_order(rows, c["favourable"], True), label_fn=lambda r, p=p: f"rally {rally_no(r.rally)}: {r.pick:.1f} s between {tok(p)}'s shot and the reply")
         c["suppressed"] = suppress(c)
         cands.append(c)
 
@@ -380,13 +387,19 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         c["favourable"] = bool(np.isfinite(res["value"]) and res["value"] >= 0)
         miss = short[~short.recovered].copy()
         miss["pick"] = miss.recovery_time
-        c["evidence"] = _windows(miss.sort_values("pick", ascending=False), label_fn=lambda r: f"rally {r.rally}: {r.pick:.1f} s without getting back to the T")
+        c["evidence"] = _windows(miss.sort_values("pick", ascending=False), label_fn=lambda r: f"rally {rally_no(r.rally)}: {r.pick:.1f} s without getting back to the T")
         c["suppressed"] = suppress(c)
         cands.append(c)
 
+    cands.extend(_situational_candidates(h))
     if facts.ball is not None and len(facts.ball):
         cands.extend(_ball_candidates(facts))
 
+    return finalise(cands, with_suppressed)
+
+
+def finalise(cands: list[dict], with_suppressed: bool = False) -> list[dict]:
+    """Number the candidates and suppress those with no interval or a gap below their metric's min_effect."""
     out = []
     for i, c in enumerate(cands):
         c["id"] = f"c{i + 1}"
@@ -394,6 +407,8 @@ def generate(facts: Facts, m_T: np.ndarray, with_suppressed: bool = False) -> li
         c.setdefault("evidence", [])
         if c.get("suppressed") is None and not c["display"]:
             c["suppressed"] = "no interval"
+        if c.get("suppressed") is None and abs(c["diff"]) < METRICS[c["metric"]].get("min_effect", 0):
+            c["suppressed"] = "too small to matter"
         if with_suppressed or c["suppressed"] is None:
             out.append(c)
     return out
@@ -418,6 +433,48 @@ def _two_sample(ga: dict, gb: dict, stat, n_boot: int = N_BOOT, alpha: float = A
     return {"value": value, "ci": [float(lo), float(hi)]}
 
 
+def _situational_candidates(h: pd.DataFrame) -> list[dict]:
+    """A player against themself or the opponent in one situation: the cost of being far from the T, and recovery from the back."""
+    out = []
+    h = h.sort_values(["rally", "shot_index"])
+    nxt = h.groupby("rally")[["hitter", "situation"]].shift(-1)
+    pairs = h.assign(next_hitter=nxt.hitter, next_rushed=nxt.situation.isin(RUSHED))
+    pairs = pairs[pairs.next_hitter.notna() & (pairs.next_hitter != pairs.hitter)]
+    for p in PLAYERS:
+        o = other(p)
+        # The opponent hits while p waits (p is the hit's `opp`); was p's next shot rushed?
+        g = pairs[pairs.hitter == o].assign(far=lambda d: d.opp_T_dist > FAR_FROM_T_M)
+
+        def rushed(d, far):
+            x = d[d.far == far].next_rushed
+            return float(x.mean()) if len(x) else np.nan
+
+        res = cluster_bootstrap(_by_rally(g), lambda d: rushed(d, True) - rushed(d, False))
+        c = _candidate(p, "situational", "off_T_cost", f"more than {FAR_FROM_T_M:g} m from the T vs nearer", rushed(g, True), rushed(g, False), res, int(g.far.sum()), res["n_rallies"], extra={"far_m": f"{FAR_FROM_T_M:g}"}, n_label="moments far from the T")
+        c["role"] = "why"  # a consequence, told as the reason behind a position finding rather than on its own
+        rows = g[g.far & g.next_rushed].assign(pick=lambda d: d.opp_T_dist).sort_values("pick", ascending=False)
+        c["evidence"] = _windows(rows, label_fn=lambda r, p=p, o=o: f"rally {rally_no(r.rally)}: {tok(p)} was {r.pick:.1f} m from the T as {tok(o)} hit")
+        c["suppressed"] = suppress(c)
+        out.append(c)
+
+    # Recovery after a shot from the back third (the cell behind the service boxes), player against opponent.
+    back = h[h.cell_hit_from.fillna("").str.startswith("back") & (h.hitter_T_dist > RECOVERY_RADIUS_M)]
+
+    def rec(d, q):
+        x = d[d.hitter == q].recovered
+        return float(x.mean()) if len(x) else np.nan
+
+    for p in PLAYERS:
+        o = other(p)
+        res = cluster_bootstrap(_by_rally(back), lambda d, p=p, o=o: rec(d, p) - rec(d, o))
+        c = _candidate(p, "vs_opponent", "recover_from_back", "vs opponent", rec(back, p), rec(back, o), res, int((back.hitter == p).sum()), res["n_rallies"], n_label="shots from the back")
+        rows = back[back.hitter == p].assign(pick=lambda d: d.recovered.astype(float) * 10 - d.recovery_time)
+        c["evidence"] = _windows(_order(rows, c["favourable"], False), label_fn=lambda r, p=p, o=o: f"rally {rally_no(r.rally)}: {tok(p)} {'got back to the T' if r.pick > 5 else 'was still away from the T'} when {tok(o)} replied")
+        c["suppressed"] = suppress(c)
+        out.append(c)
+    return out
+
+
 def _ball_candidates(facts: Facts) -> list[dict]:
     b = facts.ball
     # Only length is judged. How close to the tin a shot goes is a choice (drops and kills aim there), so it is
@@ -437,162 +494,10 @@ def _ball_candidates(facts: Facts) -> list[dict]:
             rows = b[b.hitter == p].copy()
             rows["pick"] = rows[col]
             rows = rows[rows.pick > 0] if (METRICS[metric]["better"] == "lower") != c["favourable"] else rows[rows.pick == 0]
-            c["evidence"] = _windows(rows, label_fn=lambda r: f"rally {r.rally}: front wall at {r.z:.1f} m high")
+            c["evidence"] = _windows(rows, label_fn=lambda r: f"rally {rally_no(r.rally)}: front wall at {r.z:.1f} m high")
             c["suppressed"] = suppress(c)
             out.append(c)
     return out
-
-
-# --- editor -----------------------------------------------------------------------------------
-
-
-STEMS = {
-    "t_at_strike": "{p} was {v} m from the T when {o} hit",
-    "t_overall": "{p} was on average {v} m from the T during rallies",
-    "t_share": "{p} spent {v}% of rally time within about 1 m of the T",
-    "recovered": "{p} was back near the T before the next shot {v}% of the time",
-    "time_given": "{p}'s shots left {o} {v} s before the reply",
-    "deep_bounce": "{p}'s shots first bounced in the back of the court {v}% of the time",
-}
-
-
-def _phrase(c: dict) -> list[str]:
-    """Templated sentences for one candidate; every number comes from c['display']."""
-    d, p, o = c["display"], c["player"], other(c["player"])
-    metric, gen = c["metric"], c["generator"]
-    unit = METRICS[metric]["unit"]
-    u = {"%": "%", "m": " m", "s": " s"}[unit]
-    pu = " percentage points" if unit == "%" else u
-    size = f"The difference is about {d['diff']}{pu}, probably between {d['diff_lo']} and {d['diff_hi']}{pu}"
-    base = f"({d['n_rallies']} rallies, {d['n']} {c.get('n_label', 'shots')}). {size}."
-    if gen == "short_vs_long":
-        return [f"After shots hit with less than {d['split']} s since the opponent's shot, {p} was back near the T before the next ball {d['value']}% of the time, against {d['comparison']}% after shots with more time {base}"]
-    stem = STEMS[metric].format(p=p, o=o, v=d["value"])
-    if gen == "early_vs_late":
-        return [f"In the later rallies of the clip, {stem}, against {d['comparison']}{u.strip() if unit == '%' else u} in the earlier ones {base}"]
-    if metric == "time_given":
-        return [f"{stem}, and {o}'s shots left {p} {d['comparison']} s {base}"]
-    return [f"{stem}, against {d['comparison']}{u.strip() if unit == '%' else u} for {o} {base}"]
-
-
-def template_editor(cands: list[dict]) -> dict:
-    """At most three strengths and three improvements per player, templated and cited."""
-    by_player: dict = {}
-    for p in PLAYERS:
-        mine = [c for c in cands if c["player"] == p]
-        # One item per metric per player, across strengths and improvements alike, so a behaviour is never praised and
-        # criticised in the same report: the clearest evidence (largest standardised gap) wins.
-        def key(c): return abs(c["diff"]) / max((c["ci"][1] - c["ci"][0]) / 2, 1e-9)
-        items = {"strengths": [], "improvements": []}
-        seen: set[str] = set()
-        for c in sorted(mine, key=key, reverse=True):
-            kind = "strengths" if c["favourable"] else "improvements"
-            if c["metric"] in seen or len(items[kind]) == MAX_PER_KIND:
-                continue
-            seen.add(c["metric"])
-            items[kind].append(_item(c, kind))
-        by_player[p] = items
-    return by_player
-
-
-def _item(c: dict, kind: str) -> dict:
-    cue_key = "early_late" if c["generator"] == "early_vs_late" else "short_time" if c["generator"] == "short_vs_long" else c["metric"]
-    cue, drill = COACHING[cue_key]
-    sents = [{"text": s, "cites": [c["id"]]} for s in _phrase(c)]  # the clips travel in `evidence`, not as a sentence
-    if kind == "improvements":
-        sents.append({"text": f"Cue: {cue}", "cites": [c["id"]]})
-        sents.append({"text": f"Drill: {drill}", "cites": [c["id"]]})
-    else:
-        sents.append({"text": f"Keep it going. Cue: {cue}", "cites": [c["id"]]})
-    return {"behaviour": c["title"], "metric": c["metric"], "candidate": c["id"], "sentences": sents, "evidence": [{"t0": e["t0"], "t1": e["t1"], "label": e["label"], "clip": e["clip"]} for e in c["evidence"]], "cue": cue, "drill": drill, "number": {"value": c["display"]["value"], "unit": METRICS[c["metric"]]["unit"], "n": c["n"], "n_label": c.get("n_label", "shots"), "n_rallies": c["n_rallies"], "difference_size_interval": [c["display"]["diff_lo"], c["display"]["diff_hi"]]}}
-
-
-# --- LLM editor (optional) --------------------------------------------------------------------
-
-LLM_SYSTEM = (
-    "You edit coaching notes for a junior squash player's parent and coach. You are given candidate findings as JSON, "
-    "each with an id, display numbers and evidence clips. Choose at most three strengths and three things to work on per player. "
-    "Write plain, kind sentences. Every sentence must cite the candidate ids it relies on, use only numbers shown in those candidates, "
-    "and make no technique claims, no won/lost claims and no comparison to elite players. Reply with JSON only: "
-    '{"A": {"strengths": [{"candidate": id, "sentences": [{"text": str, "cites": [id]}]}], "improvements": [...]}, "B": {...}}.'
-)
-
-
-def llm_available() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
-
-
-def default_llm_call(prompt: str) -> str:  # pragma: no cover - needs a key and network
-    import anthropic
-
-    client = anthropic.Anthropic()
-    msg = client.messages.create(model=LLM_MODEL, max_tokens=3000, system=LLM_SYSTEM, messages=[{"role": "user", "content": prompt}])
-    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-
-
-def llm_editor(cands: list[dict], call: Callable[[str], str] | None = None) -> dict | None:
-    """Parse the model's JSON into items; None when no key, or nothing usable. Sentences are verified later."""
-    if call is None:
-        if not llm_available():
-            return None
-        call = default_llm_call
-    slim = [{k: c[k] for k in ("id", "player", "metric", "title", "comparison", "favourable", "display", "evidence")} for c in cands]
-    try:
-        raw = call(json.dumps(slim))
-        data = json.loads(raw[raw.index("{") : raw.rindex("}") + 1])
-    except Exception:  # noqa: BLE001 - any failure falls back to the template
-        return None
-    by_id = {c["id"]: c for c in cands}
-    out: dict = {}
-    for p in PLAYERS:
-        out[p] = {"strengths": [], "improvements": []}
-        for kind in ("strengths", "improvements"):
-            for it in (data.get(p, {}).get(kind, []) or [])[:MAX_PER_KIND]:
-                c = by_id.get(it.get("candidate"))
-                if not c or c["player"] != p or c["favourable"] != (kind == "strengths"):
-                    continue
-                item = _item(c, kind)
-                item["sentences"] = [{"text": str(s.get("text", "")), "cites": [x for x in s.get("cites", []) if isinstance(x, str)]} for s in it.get("sentences", [])]
-                item["editor"] = "llm"
-                out[p][kind].append(item)
-    return out
-
-
-def verify_items(items: dict, cands: list[dict]) -> tuple[dict, list[dict]]:
-    """Drop sentences that fail verification; drop items left without a sentence. Returns (kept, rejections)."""
-    by_id = {c["id"]: c for c in cands}
-    rejected: list[dict] = []
-    kept: dict = {}
-    for p, kinds in items.items():
-        kept[p] = {}
-        for kind, lst in kinds.items():
-            kept[p][kind] = []
-            for it in lst:
-                good = []
-                for s in it["sentences"]:
-                    ok, why = verify_sentence(s["text"], s["cites"], by_id)
-                    if ok:
-                        good.append(s)
-                    else:
-                        rejected.append({"player": p, "text": s["text"], "reason": why})
-                if good:
-                    kept[p][kind].append({**it, "sentences": good})
-    return kept, rejected
-
-
-def edit(cands: list[dict], llm_call: Callable[[str], str] | None = None) -> tuple[dict, list[dict], str]:
-    """Editor + verifier. Uses the LLM editor when available, falls back to the template per player/kind."""
-    template, rejected_t = verify_items(template_editor(cands), cands)
-    editor = "template"
-    llm = llm_editor(cands, llm_call)
-    if llm:
-        kept, rejected = verify_items(llm, cands)
-        for p in PLAYERS:
-            for kind in ("strengths", "improvements"):
-                if not kept[p][kind]:
-                    kept[p][kind] = template[p][kind]
-        template, rejected_t, editor = kept, rejected_t + rejected, "llm+template"
-    return template, rejected_t, editor
 
 
 # --- entry point ------------------------------------------------------------------------------
@@ -600,31 +505,27 @@ def edit(cands: list[dict], llm_call: Callable[[str], str] | None = None) -> tup
 
 def build(m: Match, hits: pd.DataFrame, rallies: pd.DataFrame, stats: dict | None = None, facts: Facts | None = None) -> dict:
     """Insights for one clip (or pass `facts` built over several clips)."""
+    from squashvid.analysis import coach
+
     if facts is None:
         ball = ball_table(m, hits)
         facts = Facts.from_match(m, hits, rallies, ball=ball)
     all_cands = generate(facts, m.T, with_suppressed=True)
-    cands = [c for c in all_cands if c["suppressed"] is None]
-    items, rejected, editor = edit(cands)
-    n_r = int(facts.rallies.rally.nunique())
+    players, rejected = coach.write([c for c in all_cands if c["suppressed"] is None])
     return {
         "clip": m.stem,
-        "editor": editor,
+        "editor": "coach",
         "ball_events_used": m.ball_events is not None,
-        "n_rallies": n_r,
-        "note": "No finding is reported unless its 90% interval over rallies excludes zero and it rests on at least eight rallies; who won each rally is not known, so nothing compares winners and losers.",
-        "players": {p: {"strengths": [_pub(i) for i in items[p]["strengths"]], "improvements": [_pub(i) for i in items[p]["improvements"]]} for p in PLAYERS},
+        "n_rallies": int(facts.rallies.rally.nunique()),
+        "note": "A finding is used only when its 90% interval over rallies excludes zero, it rests on at least eight rallies and the difference is big enough to matter on court.",
+        "players": players,
         "candidates": [_pub_c(c) for c in all_cands],
         "rejected_sentences": rejected,
     }
 
 
-def _pub(i: dict) -> dict:
-    return {"behaviour": i["behaviour"], "metric": i["metric"], "candidate": i["candidate"], "number": i["number"], "text": " ".join(s["text"] for s in i["sentences"]), "sentences": i["sentences"], "evidence": i["evidence"], "cue": i["cue"], "drill": i["drill"]}
-
-
 def _pub_c(c: dict) -> dict:
-    keep = ("id", "player", "generator", "metric", "title", "comparison", "value", "comparison_value", "diff", "ci", "n", "n_label", "n_rallies", "favourable", "suppressed", "evidence", "display")
+    keep = ("id", "player", "generator", "metric", "title", "comparison", "value", "comparison_value", "diff", "ci", "n", "n_label", "n_rallies", "favourable", "suppressed", "evidence", "display", "role")
     return {k: (None if isinstance(c.get(k), float) and not np.isfinite(c[k]) else c.get(k)) for k in keep}
 
 

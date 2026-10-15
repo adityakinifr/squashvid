@@ -70,3 +70,7 @@ table.kv th { font-weight: 600; color: var(--fg); }
 
 .ci { color: #888; font-size: 0.85em; white-space: nowrap; }
 details > summary { cursor: pointer; color: #666; margin: 10px 0 4px; font-size: 12px; }
+.card .theme { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.card .watch { margin: 2px 0; font-size: 12px; }
+.card .drill { margin-top: 6px; }
+.card details > summary { margin: 6px 0 0; }

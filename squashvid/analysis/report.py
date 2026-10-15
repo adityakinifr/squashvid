@@ -3,26 +3,26 @@
 from __future__ import annotations
 
 import json
-import re
+import logging
+from pathlib import Path
 
+from squashvid.analysis.coach import fill
 from squashvid.analysis.insights import clock
 from squashvid.analysis.io import PLAYERS, WORK
 from squashvid.analysis.stats import NEAR_TIN_M
 
+log = logging.getLogger(__name__)
 
-def names() -> dict[str, str]:
+
+def names(work: Path = WORK) -> dict[str, str]:
     """Player names saved by the viewer's Names button (work/viewer_settings.json, {"names": {"A": ..., "B": ...}})."""
     out = {"A": "Player A", "B": "Player B"}
     try:
-        saved = json.loads((WORK / "viewer_settings.json").read_text()).get("names", {})
+        saved = json.loads((work / "viewer_settings.json").read_text()).get("names", {})
     except (OSError, ValueError):
         return out
     out.update({k: v.strip() for k, v in saved.items() if k in out and isinstance(v, str) and v.strip()})
     return out
-
-
-def _name_text(text: str, nm: dict[str, str]) -> str:
-    return re.sub(r"(?<![\w'])([AB])(?![\w])", lambda mo: nm[mo.group(1)] if nm[mo.group(1)] != f"Player {mo.group(1)}" else mo.group(1), text)
 
 
 def fmt(d: dict | None, dec: int = 1, scale: float = 1.0, unit: str = "", per_rally: bool = False) -> str:
@@ -48,7 +48,7 @@ def stats_table(stats: dict) -> list[str]:
         ("Back near the T before the next shot", lambda p: fmt(p["recovery_to_T"]["share_back_on_T_before_next_hit"], 0, 100, "%")),
         ("Distance run in rallies (m)", lambda p: f"{p['distance_covered_in_play_m']['value']}, {p['distance_covered_in_play_m']['n_rallies']} rallies"),
     ]
-    out = ["| | A | B |", "|---|---|---|"]
+    out = ["| | {A} | {B} |", "|---|---|---|"]
     for label, fn in rows:
         out.append(f"| {label} | {fn(P['A'])} | {fn(P['B'])} |")
     return out
@@ -72,14 +72,49 @@ def ball_table(stats: dict) -> list[str]:
         ("Centre third", lambda p: pct(B[p]["third"].get("centre"))),
         ("Right third", lambda p: pct(B[p]["third"].get("right"))),
     ]
-    out = ["| | A | B |", "|---|---|---|"]
+    out = ["| | {A} | {B} |", "|---|---|---|"]
     for label, fn in rows:
         out.append(f"| {label} | {fn('A')} | {fn('B')} |")
     return out
 
 
-def render(stem: str, stats: dict, ins: dict, title: str | None = None) -> str:
-    nm = names()
+def coaching(ins: dict, nm: dict[str, str], stem: str | None = None) -> list[str]:
+    """The layered coaching: a short list per player first, then the evidence for a coach or parent.
+
+    stem: the clip the report is about, so its own clip name is left off the timestamps (None when pooled)."""
+    from squashvid.players.identity import LOOKS
+
+    def f(text: str) -> str:
+        return fill(text, nm)
+
+    lines: list[str] = []
+    for p in PLAYERS:
+        mine = ins["players"][p]
+        lines += [f"## {nm[p]} ({LOOKS[p]})", ""]
+        if not mine["try"] and not mine["keep"]:
+            lines += ["Nothing stood out clearly enough to be sure of here. That is normal with only a few rallies.", ""]
+        if mine["try"]:
+            lines += ["**Next time, try**", ""] + [f"{i}. {f(it['headline'])}" for i, it in enumerate(mine["try"], 1)] + [""]
+        if mine["keep"]:
+            lines += ["**Keep doing**", ""] + [f"- {f(it['headline'])}" for it in mine["keep"]] + [""]
+    detail = [(p, it) for p in PLAYERS for kind in ("try", "keep") for it in ins["players"][p][kind]]
+    if detail:
+        lines += ["## For the coach or parent", ""]
+    for p, it in detail:
+        lines += [f"### {nm[p]}: {it['title']} ({'to try' if it['kind'] == 'try' else 'to keep'})", "", f"*{f(it['headline'])}*", ""]
+        lines += [f(r) for r in it["why"]] + [""]
+        if it["evidence"]:
+            when = ", ".join(f"{'' if e['clip'] == stem else e['clip'] + ' '}{clock(e['t0'])} ({f(e['label'])})" for e in it["evidence"])
+            lines += [f"- Watch {when}. In each, look at {f(it['look_for'])}."]
+        if it["drill"]:
+            lines += [f"- Drill: {it['drill']}"]
+        sure = "Clear" if it["confidence"] == "clear" else "Likely, but the gap could be small"
+        lines += [f"- How sure: {sure}. " + " ".join(f(d) for d in it["detail"]), ""]
+    return lines
+
+
+def render(stem: str, stats: dict, ins: dict, title: str | None = None, nm: dict[str, str] | None = None) -> str:
+    nm = nm or names()
     mt = stats["match"]
     lines = [
         f"# Match report: {title or stem}",
@@ -87,14 +122,13 @@ def render(stem: str, stats: dict, ins: dict, title: str | None = None) -> str:
         f"We found **{mt['rallies']} rallies** and **{mt['shots_total']} shots** in {mt['clip_seconds']:g} seconds of video. "
         + (f"A typical rally was {mt['rally_shots']['median']:g} shots and {mt['rally_seconds']['median']:g} seconds." if mt["rally_shots"]["median"] is not None else ""),
         "",
-        "This report looks at where each player stood and how much time they had. It does not score anyone, and it does not say who won.",
-        "",
+        *coaching(ins, nm, stem),
         "## The numbers",
         "",
         "Each cell shows the value, then the range we are fairly sure it lies in, then what it is based on (n shots, or rallies). "
         "Shorter ranges mean more trust. Distance run is shown only for interest: running more or less does not tell us who plays better.",
         "",
-        *[_name_text(x, nm) for x in stats_table(stats)],
+        *[fill(x, nm) for x in stats_table(stats)],
         "",
     ]
     if stats.get("ball") and all(p in stats["ball"] for p in PLAYERS):
@@ -104,37 +138,55 @@ def render(stem: str, stats: dict, ins: dict, title: str | None = None) -> str:
             "Only shots whose front-wall impact the ball tracker measured are counted, so these shares describe those shots. "
             "Some impacts are hidden behind the glass door frame, so not every shot is measured.",
             "",
-            *[_name_text(x, nm) for x in ball_table(stats)],
+            *[fill(x, nm) for x in ball_table(stats)],
             "",
         ]
-    for p in PLAYERS:
-        who = nm[p]
-        lines += [f"## {who}", ""]
-        for kind, head, empty in (
-            ("strengths", "What went well", "Nothing stood out clearly enough to be sure of in this clip. That is normal with only a few rallies."),
-            ("improvements", "What to work on", "Nothing stood out clearly enough to be sure of in this clip."),
-        ):
-            lines += [f"### {head}", ""]
-            items = ins["players"][p][kind]
-            if not items:
-                lines += [empty, ""]
-            for it in items:
-                lines += [f"**{it['behaviour'][0].upper() + it['behaviour'][1:]}**", ""]
-                for s in it["sentences"]:
-                    lines += [f"- {_name_text(s['text'], nm)}"]
-                if it["evidence"]:
-                    lines += ["", "Clips: " + "; ".join(f"{e['clip']} {clock(e['t0'])}-{clock(e['t1'])} ({_name_text(e['label'], nm)})" for e in it["evidence"])]
-                lines += [""]
     lines += [
         "## How sure are we?",
         "",
         "- Positions come from one phone behind the back wall. Distances near the front wall are rougher than near the back.",
         "- Shot times and who hit each shot are estimated from the players' movement, the sound of the ball on the front wall and the rule that players take turns. A few shots will be missing or wrong.",
-        f"- A finding only appears when it holds up across at least eight rallies. {ins['n_rallies']} rallies were available here.",
+        f"- A finding only appears when it holds up across at least eight rallies and the difference is big enough to matter. {ins['n_rallies']} rallies were available here.",
         "- Everything is about this match only. It says how things went today, not what anyone is like as a player.",
         "",
     ]
     return "\n".join(lines)
 
 
-__all__ = ["render", "names", "stats_table", "ball_table"]
+def render_pooled(ins: dict, nm: dict[str, str] | None = None) -> str:
+    """The all-clips report: pooled coaching only, since positions live in per-clip matches."""
+    nm = nm or names()
+    stems = ins["clip"].split("+")
+    head = ["# Match report: all clips together", "", f"{ins['n_rallies']} rallies across {len(stems)} clips ({', '.join(stems)}). The coaching below pools every rally; see each clip's report for its numbers.", ""]
+    return "\n".join(head + coaching(ins, nm))
+
+
+def clip_report(work: Path, stem: str, nm: dict[str, str] | None = None) -> str | None:
+    """A clip's report rendered now from its stats and insights (so it carries the current names); None if not analysed."""
+    a = work / stem / "analysis"
+    try:
+        stats, ins = json.loads((a / "stats.json").read_text()), json.loads((a / "insights.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return render(stem, stats, ins, nm=nm or names(work))
+
+
+def rewrite_all(work: Path = WORK) -> list[Path]:
+    """Re-render every report.md under work/ with the saved names; the numbers are not recomputed."""
+    nm, out = names(work), []
+    for d in sorted(p for p in work.iterdir() if (p / "analysis" / "insights.json").exists() and (p / "analysis" / "stats.json").exists()):
+        md = clip_report(work, d.name, nm)
+        if md is not None:
+            (d / "analysis" / "report.md").write_text(md)
+            out.append(d / "analysis" / "report.md")
+    pooled = work / "analysis" / "insights.json"
+    if pooled.exists():
+        try:
+            (work / "analysis" / "report.md").write_text(render_pooled(json.loads(pooled.read_text()), nm))
+            out.append(work / "analysis" / "report.md")
+        except (OSError, ValueError, KeyError) as e:
+            log.warning("pooled report not rewritten: %s", e)
+    return out
+
+
+__all__ = ["render", "render_pooled", "coaching", "clip_report", "rewrite_all", "names", "stats_table", "ball_table"]

@@ -63,3 +63,37 @@ def test_settings_persist_in_work_dir(client):
     assert json.loads((work / "viewer_settings.json").read_text())["names"]["A"] == "Deepti"
     assert c.get("/api/settings").json()["names"]["A"] == "Deepti"
     assert [x["stem"] for x in c.get("/api/clips").json()["clips"]] == ["clip"]
+
+
+def _analysis(work):
+    """A minimal analysed clip: one improvement for A that names both players."""
+    from tests.test_analysis_report import _stats
+
+    stats = {**_stats(), "match": {"rallies": 6, "shots_total": 80, "clip_seconds": 60.0, "rally_shots": {"median": 7}, "rally_seconds": {"median": 9.0}}}
+    item = {
+        "theme": "position", "title": "Getting back to the T", "kind": "try", "play": "t_overall",
+        "headline": "Stay closer to the T between shots.", "why": ["{A} was 2.0 m from the T, against 1.7 m for {B}."],
+        "look_for": "how far {A} drifts", "drill": "Ghosting.", "detail": [], "evidence": [], "cites": ["c1"], "confidence": "likely",
+    }
+    ins = {"n_rallies": 6, "players": {"A": {"try": [item], "keep": []}, "B": {"try": [], "keep": []}}}
+    a = work / "clip" / "analysis"
+    a.mkdir(parents=True)
+    (a / "stats.json").write_text(json.dumps(stats))
+    (a / "insights.json").write_text(json.dumps(ins))
+    return a
+
+
+def test_report_carries_names_saved_after_the_analysis(client):
+    c, work = client
+    a = _analysis(work)
+    assert "Player A was 2.0 m" in c.get("/api/clip/report").json()["markdown"]
+    c.post("/api/settings", json={"names": {"A": "Deepti", "B": "Maya"}})
+    md = c.get("/api/clip/report").json()["markdown"]
+    assert "Deepti was 2.0 m from the T, against 1.7 m for Maya." in md and "## Deepti" in md
+    assert "Deepti was 2.0 m" in (a / "report.md").read_text()  # the file on disk follows the names too
+
+
+def test_settings_say_how_to_tell_the_players_apart(client):
+    c, _ = client
+    looks = c.get("/api/settings").json()["looks"]
+    assert set(looks) == {"A", "B"} and all(looks.values())

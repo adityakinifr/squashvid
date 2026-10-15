@@ -58,6 +58,7 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
 
     Assumes A and B are the same two people in every clip. Output goes to work/analysis/.
     """
+    from squashvid.analysis import coach
     from squashvid.analysis import insights as I
     from squashvid.analysis import report as P
     from squashvid.analysis.io import WORK
@@ -67,36 +68,21 @@ def run_pooled(stems: list[str], use_ball: bool = True) -> dict:
         m = load(stem, use_ball=use_ball)
         r = pd.read_parquet(out_dir(stem) / "rallies.parquet")
         h = pd.read_parquet(out_dir(stem) / "hits.parquet")
-        parts.append(I.Facts.from_match(m, h, r, offset=1000 * (i + 1), ball=I.ball_table(m, h)))
+        parts.append(I.Facts.from_match(m, h, r, offset=I.RALLY_BLOCK * (i + 1), ball=I.ball_table(m, h)))
         m0 = m0 or m
     facts = I.Facts.concat(parts)
     all_c = I.generate(facts, m0.T, with_suppressed=True)
-    cands = [c for c in all_c if c["suppressed"] is None]
-    items, rejected, editor = I.edit(cands)
+    players, rejected = coach.write([c for c in all_c if c["suppressed"] is None])
     ins = {
         "clip": "+".join(stems),
-        "editor": editor,
+        "editor": "coach",
         "n_rallies": int(facts.rallies.rally.nunique()),
-        "players": {p: {k: [I._pub(i) for i in items[p][k]] for k in ("strengths", "improvements")} for p in PLAYERS},
+        "players": players,
         "candidates": [I._pub_c(c) for c in all_c],
         "rejected_sentences": rejected,
     }
     d = WORK / "analysis"
     d.mkdir(exist_ok=True)
     (d / "insights.json").write_text(json.dumps(ins, indent=1))
-    # Pooled key-stats table: recompute with the same functions on concatenated rallies is not meaningful across clips
-    # (positions live in per-clip matches), so the report quotes the insights and per-clip tables.
-    stats = {"players": {}, "match": {"rallies": ins["n_rallies"], "shots_total": int(len(facts.hits)), "clip_seconds": 0, "rally_shots": {"median": None}, "rally_seconds": {"median": None}}}
-    lines = ["# Match report: all clips together", "", f"{ins['n_rallies']} rallies across {len(stems)} clips ({', '.join(stems)}). The findings below pool every rally; see each clip's report for its key-stats table.", ""]
-    nm = P.names()
-    for p in PLAYERS:
-        lines += [f"## {nm[p]}", ""]
-        for kind, head in (("strengths", "What went well"), ("improvements", "What to work on")):
-            lines += [f"### {head}", ""]
-            if not ins["players"][p][kind]:
-                lines += ["Nothing stood out clearly enough to be sure of.", ""]
-            for it in ins["players"][p][kind]:
-                lines += [f"**{it['behaviour'][0].upper() + it['behaviour'][1:]}**", ""] + [f"- {P._name_text(s['text'], nm)}" for s in it["sentences"]] + [""]
-    (d / "report.md").write_text("\n".join(lines))
-    del stats
-    return {"clip": ins["clip"], "rallies": ins["n_rallies"], "strengths": {p: len(ins["players"][p]["strengths"]) for p in PLAYERS}}
+    (d / "report.md").write_text(P.render_pooled(ins))
+    return {"clip": ins["clip"], "rallies": ins["n_rallies"], "items": {p: {k: len(v) for k, v in ins["players"][p].items()} for p in PLAYERS}}

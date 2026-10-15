@@ -6,11 +6,13 @@ Local use only (bound to 127.0.0.1 by default); nothing here is meant to be serv
 """
 
 import json
+import logging
 import re
 from pathlib import Path
 
 from pydantic import BaseModel
 
+log = logging.getLogger(__name__)
 STATIC = Path(__file__).with_name("static")
 DEFAULT_SETTINGS = {"names": {"A": "Player A", "B": "Player B"}}
 CHUNK = 1 << 20
@@ -133,7 +135,19 @@ def create_app(work=None):
 
     @app.get("/api/settings")
     def get_settings():
-        return JSONResponse(load_settings(settings_path))
+        from squashvid.players.identity import LOOKS
+
+        return JSONResponse({**load_settings(settings_path), "looks": LOOKS})
+
+    @app.get("/api/{stem}/report")
+    def report(stem: str):
+        """The clip's report rendered now, so it carries the names saved since the analysis ran."""
+        from squashvid.analysis.report import clip_report
+
+        md = clip_report(work, stem_dir(stem).name, load_settings(settings_path)["names"])
+        if md is None:
+            raise HTTPException(404, "no analysis yet: run `python -I -m squashvid.analysis " + stem + "`")
+        return JSONResponse({"markdown": md}, headers={"Cache-Control": "no-cache"})
 
     @app.post("/api/settings")
     def post_settings(s: Settings):
@@ -143,6 +157,12 @@ def create_app(work=None):
         tmp = settings_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
         tmp.replace(settings_path)
+        from squashvid.analysis.report import rewrite_all
+
+        try:  # keep the report files on disk in step with the names; the viewer renders its own copy regardless
+            rewrite_all(work)
+        except Exception as e:  # noqa: BLE001 - a stale report file must not fail the save
+            log.warning("reports not rewritten after a name change: %s", e)
         return data
 
     from fastapi.staticfiles import StaticFiles

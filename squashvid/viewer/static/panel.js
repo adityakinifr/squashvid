@@ -143,15 +143,39 @@ const Panel = (() => {
     }
     return out;
   }
+  // Generated text names players as {A} and {B}; fill in the saved names, as the server-rendered report does.
+  const nameText = s => String(s).replace(/\{([AB])\}/g, (m, p) => V.names[p]);
   function insightCards(items, cls) {
     return items.map(it => {
-      if (typeof it === 'string') return `<div class="card ${cls}">${esc(it)}</div>`;
-      const title = it.title ?? it.headline ?? it.behaviour ?? it.name ?? it.summary ?? it.insight ?? it.text ?? '';
-      const text = it.text ?? it.description ?? it.detail ?? it.explanation ?? (it.summary !== title ? it.summary : '') ?? '';
-      const extra = [it.cue && `Cue: ${it.cue}`, it.drill && `Drill: ${it.drill}`].filter(Boolean).map(x => `<div class="note">${esc(x)}</div>`).join('');
+      if (typeof it === 'string') return `<div class="card ${cls}">${esc(nameText(it))}</div>`;
+      const title = it.title ?? it.headline ?? it.name ?? it.summary ?? it.text ?? '';
+      const text = nameText(it.text ?? it.description ?? it.detail ?? (it.summary !== title ? it.summary : '') ?? '');
       const pk = it.player && playerKey(it.player);
       const pl = pk ? `<span class="p${pk.toLowerCase()}">${esc(V.names[pk])}</span> ` : '';
-      return `<div class="card ${cls}"><div class="h">${pl}${esc(title)}</div>${text && text !== title ? `<div>${esc(text)}</div>` : ''}${extra}${evidenceTimes(it).map(([t, l]) => chip(t, l ? `${fmtTime(t)} ${esc(l)}` : null)).join('')}</div>`;
+      return `<div class="card ${cls}"><div class="h">${pl}${esc(nameText(title))}</div>${text && text !== title ? `<div>${esc(text)}</div>` : ''}${evidenceTimes(it).map(([t, l]) => chip(t, l ? `${fmtTime(t)} ${esc(nameText(l))}` : null)).join('')}</div>`;
+    }).join('');
+  }
+  // One coaching item: the line for the player first, then why, the moments to watch and a drill, with how sure it
+  // is folded away for a coach or parent.
+  function coachCard(it) {
+    const f = s => esc(nameText(s));
+    const watch = evidenceTimes(it).map(([t, l]) => `<div class="watch">${chip(t)} ${l ? f(l) : ''}</div>`).join('');
+    const sure = it.confidence === 'clear' ? 'Clear.' : 'Likely, but the gap could be small.';
+    return `<div class="card ${it.kind === 'try' ? 'bad' : 'good'}"><div class="theme">${esc(it.title)}</div><div class="h">${f(it.headline)}</div>`
+      + it.why.map(w => `<div>${f(w)}</div>`).join('')
+      + (watch ? `<div class="note">Watch these, looking at ${f(it.look_for)}:</div>${watch}` : '')
+      + (it.drill ? `<div class="drill"><b>Drill:</b> ${esc(it.drill)}</div>` : '')
+      + `<details><summary>How sure</summary><div class="note">${sure} ${it.detail.map(f).join(' ')}</div></details></div>`;
+  }
+  function coachHtml(players) {
+    return ['A', 'B'].map(p => {
+      const mine = players[p] ?? { try: [], keep: [] };
+      const look = V.looks?.[p] ? ` <span class="note">(${esc(V.looks[p])})</span>` : '';
+      let h = `<h4><span class="p${p.toLowerCase()}">${esc(V.names[p])}</span>${look}</h4>`;
+      if (!mine.try.length && !mine.keep.length) h += '<div class="note">Nothing stood out clearly enough to be sure of here. That is normal with only a few rallies.</div>';
+      if (mine.try.length) h += `<div class="note">Next time, try</div>${mine.try.map(coachCard).join('')}`;
+      if (mine.keep.length) h += `<div class="note">Keep doing</div>${mine.keep.map(coachCard).join('')}`;
+      return h;
     }).join('');
   }
   const SKIP_INSIGHT_KEYS = new Set(['candidates', 'rejected_sentences']);
@@ -170,6 +194,7 @@ const Panel = (() => {
     const ins = D.meta.insights;
     if (!ins) return '<div class="empty">No analysis/insights.json yet. Strengths and improvements, each with clickable evidence timestamps, appear here when the analysis stage writes it.</div>';
     const note = isObj(ins) && typeof ins.note === 'string' ? `<div class="note">${esc(ins.note)}</div>` : '';
+    if (isObj(ins.players) && Object.values(ins.players).every(x => Array.isArray(x?.try))) return coachHtml(ins.players) + note;
     const h = insightWalk(Array.isArray(ins) ? { insights: ins } : ins, '', '');
     return note + (h || `<pre>${esc(JSON.stringify(ins, null, 1))}</pre>`);
   }
@@ -186,10 +211,11 @@ const Panel = (() => {
   }
 
   function mdToHtml(md) {
-    let out = '', list = false, table = 0;
+    let out = '', list = '', table = 0;
     const cells = ln => ln.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const close = () => { if (list) { out += `</${list}>`; list = ''; } };
     for (const ln of esc(md).split('\n')) {
-      const li = /^\s*[-*]\s+(.*)/.exec(ln), hd = /^(#{1,4})\s+(.*)/.exec(ln), tr = /^\s*\|/.test(ln);
+      const li = /^\s*[-*]\s+(.*)/.exec(ln), oli = /^\s*\d+\.\s+(.*)/.exec(ln), hd = /^(#{1,4})\s+(.*)/.exec(ln), tr = /^\s*\|/.test(ln);
       if (table && !tr) { out += '</tbody></table>'; table = 0; }
       if (tr) {
         if (/^\s*\|[\s|:-]+\|\s*$/.test(ln)) continue;  // the header separator row
@@ -197,15 +223,33 @@ const Panel = (() => {
         out += `<tr>${cells(ln).map(c => `<td>${c}</td>`).join('')}</tr>`;
         continue;
       }
-      if (li) { if (!list) { out += '<ul>'; list = true; } out += `<li>${li[1]}</li>`; continue; }
-      if (list) { out += '</ul>'; list = false; }
+      const item = li || oli;
+      if (item) {
+        const kind = li ? 'ul' : 'ol';
+        if (list !== kind) { close(); out += `<${kind}>`; list = kind; }
+        out += `<li>${item[1]}</li>`;
+        continue;
+      }
+      if (list && !ln.trim()) continue;  // a blank line inside a list does not end it
+      close();
       if (hd) out += `<h4>${hd[2]}</h4>`; else if (ln.trim()) out += `<p>${ln}</p>`;
     }
     if (table) out += '</tbody></table>';
-    if (list) out += '</ul>';
-    return out.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\b(\d{1,2}):(\d\d)(?:\.\d+)?\b/g, (m, a, b) => `<span class="chip" data-t="${+a * 60 + +b}">${m}</span>`);
+    close();
+    return out.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*(\S(?:[^*\n]*\S)?)\*(?![*\w])/g, '$1<i>$2</i>')
+      .replace(/\b(\d{1,2}):(\d\d)(?:\.\d+)?\b/g, (m, a, b) => `<span class="chip" data-t="${+a * 60 + +b}">${m}</span>`);
   }
-  const reportHtml = D => D.meta.report ? mdToHtml(D.meta.report) : '<div class="empty">No analysis/report.md yet.</div>';
+  // The server renders the report on request, so it carries the names saved since the analysis ran.
+  const reportCache = {};
+  function reportHtml(D) {
+    const key = [D.stem, V.names.A, V.names.B].join('|');
+    const md = key in reportCache ? reportCache[key] ?? D.meta.report : D.meta.report;
+    if (!(key in reportCache)) {
+      const done = j => { reportCache[key] = j ? j.markdown : null; if (tab === 'report' && V.D === D) render(); };
+      fetch(`/api/${D.stem}/report`).then(r => r.ok ? r.json() : null).then(done, () => done(null));
+    }
+    return md ? mdToHtml(md) : '<div class="empty">No analysis/report.md yet.</div>';
+  }
 
   function render() {
     const D = V.D; lastNow = -1;

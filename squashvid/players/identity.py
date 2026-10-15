@@ -18,6 +18,8 @@ import numpy as np
 
 from squashvid.players.appearance import FEATURES
 
+# How to tell the players apart on screen: the colour model is seeded so that A is the light-blue shirt.
+LOOKS = {"A": "light-blue shirt", "B": "dark shirt"}
 COLOUR_COLS = [FEATURES.index(c) for c in ("frac_blue", "b", "L", "frac_dark")]
 COLOUR_SCALE = np.array([1.0, 0.1, 0.02, 1.0])  # bring b* and L* to unit-ish ranges
 LLR_CLIP = 4.0

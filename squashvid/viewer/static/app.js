@@ -69,8 +69,13 @@
 
   // ---- names ----
   async function loadSettings() {
-    try { const s = await (await fetch('/api/settings')).json(); V.names = { ...V.names, ...s.names }; } catch (e) { console.warn('settings', e); }
-    $('name-A').value = V.names.A; $('name-B').value = V.names.B;
+    try {
+      const s = await (await fetch('/api/settings')).json();
+      V.names = { ...V.names, ...s.names };
+      if (s.looks) { V.looks = s.looks; $('look-A').textContent = `(${s.looks.A})`; $('look-B').textContent = `(${s.looks.B})`; $('names-btn').title = `Name the players: A wears the ${s.looks.A}, B the ${s.looks.B}`; }
+    } catch (e) { console.warn('settings', e); }
+    // A blank box keeps the default label; the server stores 'Player A' / 'Player B' for blanks.
+    $('name-A').value = V.names.A === 'Player A' ? '' : V.names.A; $('name-B').value = V.names.B === 'Player B' ? '' : V.names.B;
   }
   $('names-btn').addEventListener('click', () => { $('names-form').hidden = !$('names-form').hidden; });
   $('names-save').addEventListener('click', async () => {
