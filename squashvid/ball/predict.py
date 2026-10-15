@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -150,6 +151,22 @@ def save_alignment(original: str, start: float, end: float) -> Path:
     return merge_save(m, ball_dir(COPIES[original]) / "orig_frames.parquet")
 
 
+def run_full(stem: str, specs: list[str], half: bool = False, coreml: str | None = None, log: Path | None = None) -> list[dict]:
+    """Every spec over the whole clip in chunks (context frames dropped); one stats dict per chunk, appended to the log."""
+    log = log or LABELS.parent / "ball_runs.jsonl"
+    duration = float(video(stem).timestamps[-1]) + 1e-3  # so the last frame falls inside [keep_from, keep_to)
+    out = []
+    for run_from, keep_from, keep_to, run_to in chunks(duration):
+        for spec in specs:
+            _, variant, stats = run_one(spec, stem, run_from, run_to, half=half, coreml=coreml, keep=(keep_from, keep_to))
+            stats.update(window="full", roi="full", ts=time.time(), load=list(np.round(os.getloadavg(), 1)))
+            with log.open("a") as fh:
+                fh.write(json.dumps(stats) + "\n")
+            print(json.dumps(stats), flush=True)
+            out.append(stats)
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m squashvid.ball.predict")
     p.add_argument("specs", nargs="+", help="model@size, e.g. blurball@576x1024")
@@ -170,14 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     wins = json.loads((LABELS / "windows.json").read_text())
     if a.full is not None:
         for stem in a.full or sorted({w["stem"] for w in wins}):
-            duration = float(video(stem).timestamps[-1]) + 1e-3  # so the last frame falls inside [keep_from, keep_to)
-            for run_from, keep_from, keep_to, run_to in chunks(duration):
-                for spec in a.specs:
-                    _, variant, stats = run_one(spec, stem, run_from, run_to, half=a.half, coreml=a.coreml, keep=(keep_from, keep_to))
-                    stats.update(window="full", roi="full", ts=time.time(), load=list(np.round(__import__("os").getloadavg(), 1)))
-                    with a.log.open("a") as fh:
-                        fh.write(json.dumps(stats) + "\n")
-                    print(json.dumps(stats), flush=True)
+            run_full(stem, a.specs, half=a.half, coreml=a.coreml, log=a.log)
         return 0
     if a.windows:
         wins = [w for w in wins if w["id"] in a.windows]

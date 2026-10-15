@@ -9,6 +9,7 @@ blurred into the frames around it.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,12 @@ REACQUIRE_MATCH_FRAC = 0.45
 REACQUIRE_RMS = 1.2  # reference px (see lines.REFERENCE_WIDTH)
 JUMP_PX = 3.0  # reference px of frame-to-frame court motion that starts a new segment
 SMOOTH_FRAMES = 9
+# Where the phone sits behind the back glass of court 5 (IMG_4091 frame 0). Every clip so far starts within a few cm and
+# degrees of this, and the first frame's coarse search covers that spread; a different court or mount needs its own seed.
+SEED_POSE = (
+    np.array([1.633313124097702, -0.004703997290973849, 0.02261087069225295]),
+    np.array([-2.8095257861677725, 1.234736875538943, 2.0130706223337573]),
+)
 
 
 @dataclass
@@ -152,3 +159,27 @@ def save(df: pd.DataFrame, path: str | Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(path, index=False)
     return path
+
+
+def summarise(df: pd.DataFrame) -> dict:
+    """Quality numbers of a registered clip: how well the court lines matched, and how often the phone moved."""
+    return {
+        "frames": int(len(df)),
+        "match_frac_median": round(float(df.match_frac.median()), 4),
+        "match_frac_p5": round(float(df.match_frac.quantile(0.05)), 4),
+        "rms_median": round(float(df.rms.median()), 4),
+        "rms_p95": round(float(df.rms.quantile(0.95)), 4),
+        "segments": int(df.segment.nunique()),
+        "reacquired": int(df.reacquired.sum()),
+    }
+
+
+def register_video(video: Video, venue: Venue, out_dir: str | Path, progress=None) -> dict:
+    """Track every frame from SEED_POSE, smooth within segments, write camera.parquet and camera_summary.json."""
+    out_dir = Path(out_dir)
+    poses = track(video, venue, venue.camera(*SEED_POSE), progress=progress)
+    df = segment_and_smooth(to_frame(poses), venue)
+    save(df, out_dir / "camera.parquet")
+    summary = summarise(df)
+    (out_dir / "camera_summary.json").write_text(json.dumps(summary, indent=1))
+    return summary

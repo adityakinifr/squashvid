@@ -1,5 +1,7 @@
 # Match viewer
 
+To get a new video into the viewer in one step, see [process.md](process.md).
+
 A local web app (never served publicly) that plays a match video beside a 3D court, a floor plan and a front-wall view, synced, with tracking, events and statistics.
 
 ## Run it

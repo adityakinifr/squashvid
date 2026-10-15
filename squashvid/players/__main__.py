@@ -22,13 +22,39 @@ ROOT = Path(os.path.expanduser("~/code/squashvid"))
 
 def matching_venue(width: int, height: int):
     """The court-5 venue whose intrinsics belong to this frame size."""
+    from squashvid.ball.clips import venue_for_size
     from squashvid.calib.venue import Venue
 
-    for path in sorted((ROOT / "work").glob("venue_court5*.json")):
-        venue = Venue.load(path)
-        if tuple(venue.size) == (width, height):
-            return venue
-    raise FileNotFoundError(f"no work/venue_court5*.json for {width}x{height}; pass --venue")
+    return Venue.load(venue_for_size(width, height, ROOT / "work"))
+
+
+def run(video_path: Path, stem: str | None = None, venue_json: str | None = None, imgsz: int = 1024, work: Path | None = None,
+        start: float = 0.0, end: float | None = None, force: bool = False, render: bool = True) -> Path:
+    """Extract (when detections are missing or force) and run the offline stages; returns the output directory.
+
+    The camera table is work/<stem>/camera.parquet, so register the clip first."""
+    from squashvid.calib.venue import Venue
+    from squashvid.media.video import Video
+    from squashvid.players.extract import extract
+    from squashvid.players.geometry import CameraTrack
+
+    stem = stem or video_path.stem
+    work = work or ROOT / "work" / stem
+    video = Video(video_path)
+    venue = Venue.load(venue_json) if venue_json else matching_venue(video.info.width, video.info.height)
+    cams = CameraTrack.load(venue, ROOT / "work" / stem / "camera.parquet")
+    if force or not (work / "detections.parquet").exists():
+        t0 = time.perf_counter()
+
+        def progress(n: int, t: float) -> None:
+            if n % 800 == 0:
+                print(f"  {stem} t={t:7.1f}s frames={n} {n / (time.perf_counter() - t0):.1f} fps", flush=True)
+
+        extract(video, venue, cams, work, start, end, progress, imgsz)
+    from squashvid.players.run import offline
+
+    offline(video, venue, cams, work, render=render)
+    return work
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,28 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-render", action="store_true")
     a = p.parse_args(argv)
 
-    from squashvid.calib.venue import Venue
-    from squashvid.media.video import Video
-    from squashvid.players.extract import extract
-    from squashvid.players.geometry import CameraTrack
-
-    video_path = Path(os.path.expanduser(a.video))
-    stem = video_path.stem
-    work = Path(a.work) if a.work else ROOT / "work" / stem
-    video = Video(video_path)
-    venue = Venue.load(a.venue) if a.venue else matching_venue(video.info.width, video.info.height)
-    cams = CameraTrack.load(venue, ROOT / "work" / stem / "camera.parquet")
-    if a.extract or not (work / "detections.parquet").exists():
-        t0 = time.perf_counter()
-
-        def progress(n: int, t: float) -> None:
-            if n % 800 == 0:
-                print(f"  {stem} t={t:7.1f}s frames={n} {n / (time.perf_counter() - t0):.1f} fps", flush=True)
-
-        extract(video, venue, cams, work, a.start, a.end, progress, a.imgsz)
-    from squashvid.players.run import offline
-
-    offline(video, venue, cams, work, render=not a.no_render)
+    run(Path(os.path.expanduser(a.video)), venue_json=a.venue, imgsz=a.imgsz, work=Path(a.work) if a.work else None,
+        start=a.start, end=a.end, force=a.extract, render=not a.no_render)
     return 0
 
 

@@ -9,6 +9,7 @@ copy frame k is not original frame k, so frames are matched by time (see align.p
 
 from __future__ import annotations
 
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -35,18 +36,61 @@ CLIPS = {
     **{copy: f"~/Downloads/{copy}.mp4" for copy in COPIES.values()},
 }
 COPY_SCALE = 1920 / 1024  # original pixels per copy pixel (both 16:9)
+REGISTRY = "clips.json"  # work/clips.json: stem -> absolute video path, written by `python -m squashvid.process`
 
 
-def is_original(stem: str) -> bool:
-    return stem in COPIES
+def registered(work: Path | None = None) -> dict[str, str]:
+    """Clips added without editing code; empty when work/clips.json does not exist."""
+    path = (work or WORK) / REGISTRY
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def register(stem: str, path: str | Path, work: Path | None = None) -> Path:
+    """Record stem -> absolute video path in work/clips.json (a later call for the same stem replaces it)."""
+    work = work or WORK
+    work.mkdir(parents=True, exist_ok=True)
+    reg = {**registered(work), stem: str(Path(path).expanduser().resolve())}
+    out = work / REGISTRY
+    out.write_text(json.dumps(reg, indent=1, sort_keys=True))
+    return out
 
 
 def clip_path(stem: str) -> Path:
-    return Path(os.path.expanduser(CLIPS[stem]))
+    if stem in CLIPS:
+        return Path(os.path.expanduser(CLIPS[stem]))
+    reg = registered()
+    if stem not in reg:
+        raise KeyError(f"unknown clip {stem!r}: not one of {sorted(CLIPS)} and not in {WORK / REGISTRY} (register it with `python -I -m squashvid.process <video> --stem {stem}`)")
+    return Path(reg[stem])
+
+
+def venue_for_size(width: int, height: int, work: Path | None = None) -> Path:
+    """The court-5 venue file whose intrinsics belong to this frame size."""
+    from squashvid.calib.venue import Venue
+
+    for path in sorted((work or WORK).glob("venue_court5*.json")):
+        if tuple(Venue.load(path).size) == (width, height):
+            return path
+    raise FileNotFoundError(f"no work/venue_court5*.json for {width}x{height}: this command handles court 5 only; a new court needs a venue calibration")
+
+
+@lru_cache(maxsize=None)
+def frame_size(stem: str) -> tuple[int, int]:
+    from squashvid.media.video import probe
+
+    info = probe(clip_path(stem))
+    return info.width, info.height
+
+
+def is_original(stem: str) -> bool:
+    """A 1920x1080 clip (an iPhone original, or a registered one of that size), as opposed to a 1024x576 copy."""
+    return stem in COPIES or (stem not in CLIPS and frame_size(stem)[0] == 1920)
 
 
 def venue_path(stem: str) -> Path:
-    return VENUE_1080 if is_original(stem) else VENUE
+    if stem in CLIPS:
+        return VENUE_1080 if is_original(stem) else VENUE
+    return venue_for_size(*frame_size(stem))
 
 
 def work_dir(stem: str) -> Path:

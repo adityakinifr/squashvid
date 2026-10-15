@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from squashvid.ball import labels as ball_labels
 from squashvid.ball.clips import LABELS, WORK, ball_dir, video, work_dir
 from squashvid.ball.finetune import FOLD_TESTS
 
+log = logging.getLogger(__name__)
 LABELLER = "aditya"
 SUFFIX = "@576x1024-coreml.parquet"
 FOLD_OF = {w: f for f, ws in FOLD_TESTS.items() for w in ws}
@@ -74,8 +76,14 @@ def audio_onsets(stem: str) -> pd.DataFrame:
 
 
 def audio_offset(stem: str) -> float:
-    """Audio minus video, seconds (work/<stem>/audio_eval.json)."""
-    return float(json.loads((work_dir(stem) / "audio_eval.json").read_text())["offset_used_ms"]) / 1e3
+    """Audio minus video, seconds (work/<stem>/audio_eval.json, written only when the clip has hit labels).
+
+    A clip without labels gets 0: the offsets measured on the labelled clips are a few ms, below one video frame."""
+    path = work_dir(stem) / "audio_eval.json"
+    if not path.exists():
+        log.warning("%s: no audio_eval.json (no hit labels); using audio offset 0", stem)
+        return 0.0
+    return float(json.loads(path.read_text())["offset_used_ms"]) / 1e3
 
 
 def players(stem: str) -> pd.DataFrame:
