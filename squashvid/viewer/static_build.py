@@ -83,7 +83,7 @@ def mark_static(html: str) -> str:
 def build(out: Path, work: Path = WORK, stems: list[str] | None = None) -> dict:
     from squashvid.analysis.report import clip_report, render_pooled
     from squashvid.players.identity import LOOKS
-    from squashvid.viewer.server import load_settings
+    from squashvid.viewer.server import load_settings, names_for
 
     out = Path(out)
     stems = stems or sorted(d.name for d in work.iterdir() if (d / "viewer" / "meta.json").exists() and (d / "proxy.mp4").exists())
@@ -109,7 +109,7 @@ def build(out: Path, work: Path = WORK, stems: list[str] | None = None) -> dict:
     for stem in stems:
         src, d = work / stem, data / stem
         shutil.copytree(src / "viewer", d)
-        md = clip_report(work, stem, names)
+        md = clip_report(work, stem, names_for(settings, stem))
         if md is not None:
             (d / "report.json").write_text(json.dumps({"markdown": md}))
         web, proxy = src / "web.mp4", src / "proxy.mp4"

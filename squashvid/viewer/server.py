@@ -21,6 +21,7 @@ _RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
 
 class Settings(BaseModel):
     names: dict[str, str]
+    stem: str | None = None  # the clip open when the names were saved; a clip with its own names keeps them apart
 
 
 def parse_range(header, size):
@@ -48,7 +49,13 @@ def load_settings(path):
     except Exception:
         data = {}
     names = {**DEFAULT_SETTINGS["names"], **{k: v for k, v in (data.get("names") or {}).items() if isinstance(v, str) and v.strip()}}
-    return {**data, "names": names}
+    clip_names = {s: {k: v for k, v in n.items() if k in ("A", "B") and isinstance(v, str) and v.strip()} for s, n in (data.get("clip_names") or {}).items() if isinstance(n, dict)}
+    return {**data, "names": names, "clip_names": clip_names}
+
+
+def names_for(settings: dict, stem: str | None) -> dict[str, str]:
+    """The names a clip shows: its own (default labels for any it leaves unnamed) when it has them, else the shared ones."""
+    return {**DEFAULT_SETTINGS["names"], **settings["clip_names"][stem]} if stem in settings["clip_names"] else settings["names"]
 
 
 def create_app(work=None):
@@ -163,7 +170,7 @@ def create_app(work=None):
         """The clip's report rendered now, so it carries the names saved since the analysis ran."""
         from squashvid.analysis.report import clip_report
 
-        md = clip_report(work, stem_dir(stem).name, load_settings(settings_path)["names"])
+        md = clip_report(work, stem_dir(stem).name, names_for(load_settings(settings_path), stem))
         if md is None:
             raise HTTPException(404, "no analysis yet: run `python -I -m squashvid.analysis " + stem + "`")
         return JSONResponse({"markdown": md}, headers={"Cache-Control": "no-cache"})
@@ -171,7 +178,11 @@ def create_app(work=None):
     @app.post("/api/settings")
     def post_settings(s: Settings):
         data = load_settings(settings_path)
-        data["names"] = {**data["names"], **{k: v.strip() or DEFAULT_SETTINGS["names"].get(k, k) for k, v in s.names.items() if k in ("A", "B")}}
+        new = {k: v.strip() or DEFAULT_SETTINGS["names"].get(k, k) for k, v in s.names.items() if k in ("A", "B")}
+        if s.stem in data["clip_names"]:
+            data["clip_names"][s.stem] = {**data["clip_names"][s.stem], **new}
+        else:
+            data["names"] = {**data["names"], **new}
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = settings_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))

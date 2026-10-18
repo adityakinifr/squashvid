@@ -51,6 +51,7 @@ def coarse_align(
     spec: court.CourtSpec | None = None,
     shifts: tuple[float, ...] = (-0.8, -0.4, 0.0, 0.4, 0.8),
     trunc: float = TRUNCATE_PX,
+    pitches: tuple[float, ...] = (-0.12, -0.06, 0.0, 0.06, 0.12),
 ) -> CoarseResult:
     """Search pose around `cam` (lateral camera shifts as extra starts) to minimise chamfer distance.
 
@@ -74,14 +75,16 @@ def coarse_align(
         # A lateral move usually comes with the phone turning back toward the court: seed yaw too.
         best_seed = start
         best_seed_score = chamfer(make(start), dist, pts, trunc)
+        # A hand-held phone also tilts: seed pitch about the camera's own horizontal axis.
         for dyaw in np.linspace(-0.15, 0.15, 7):
-            cand = start.copy()
-            R = cv2.Rodrigues(cand[:3])[0]
-            Ry = cv2.Rodrigues(np.array([0.0, dyaw, 0.0]))[0]  # yaw about the camera's own vertical axis
-            cand[:3] = cv2.Rodrigues(Ry @ R)[0].reshape(3)
-            s = chamfer(make(cand), dist, pts, trunc)
-            if s < best_seed_score:
-                best_seed, best_seed_score = cand, s
+            for dpitch in pitches:
+                cand = start.copy()
+                R = cv2.Rodrigues(cand[:3])[0]
+                Ry = cv2.Rodrigues(np.array([dpitch, dyaw, 0.0]))[0]  # yaw about the camera's vertical axis, pitch about its horizontal
+                cand[:3] = cv2.Rodrigues(Ry @ R)[0].reshape(3)
+                s = chamfer(make(cand), dist, pts, trunc)
+                if s < best_seed_score:
+                    best_seed, best_seed_score = cand, s
         sol = minimize(lambda x: chamfer(make(x), dist, pts, trunc), best_seed, method="Powell", options={"xtol": 1e-4, "ftol": 1e-4, "maxfev": 4000})
         res = CoarseResult(make(sol.x), float(sol.fun))
         if best is None or res.score < best.score:

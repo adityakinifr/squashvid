@@ -137,7 +137,7 @@ const Panel = (() => {
     for (const e of arr) {
       if (typeof e === 'number') out.push([e, null, null]);
       else if (isObj(e)) {
-        if (e.clip && V.D && e.clip !== V.D.stem && scope !== 'pooled') continue;
+        if (e.clip && V.D && e.clip !== V.D.stem && curScope() !== 'pooled') continue;
         const t = e.t ?? e.time ?? e.t0 ?? e.start_t ?? e.t_start ?? e.timestamp ?? e.start;
         if (typeof t === 'number') out.push([t, e.label ?? e.note ?? e.desc ?? null, e.clip && V.D && e.clip !== V.D.stem ? e.clip : null]);
       }
@@ -207,9 +207,13 @@ const Panel = (() => {
   }
   // Which coaching the Insights and Report tabs show: this clip's, or the one pooled over every clip (more rallies,
   // so more findings hold up).
+  // A clip with its own player names (other people) is not in the pooled analysis, so it only shows its own.
   let scope = 'clip';
   const pooled = { insights: undefined, report: {} };
+  const ownNames = () => !!(V.D && V.clipNames?.[V.D.stem]);
+  const curScope = () => (ownNames() ? 'clip' : scope);
   function scopeBar() {
+    if (ownNames()) return '';
     const b = (k, txt) => `<button data-scope="${k}" class="${scope === k ? 'on' : ''}">${txt}</button>`;
     return `<div class="scope">${b('clip', 'This clip')}${b('pooled', 'All clips')}</div>`;
   }
@@ -222,7 +226,7 @@ const Panel = (() => {
     return `<div class="note">${pooled.insights.n_rallies} rallies from ${esc(pooled.insights.clip.split('+').join(', '))}. Moments in another clip open that clip.</div>` + coachHtml(pooled.insights.players);
   }
   function insightsHtml(D) {
-    return scopeBar() + (scope === 'pooled' ? pooledInsightsHtml() : clipInsightsHtml(D));
+    return scopeBar() + (curScope() === 'pooled' ? pooledInsightsHtml() : clipInsightsHtml(D));
   }
   function clipInsightsHtml(D) {
     const ins = D.meta.insights;
@@ -281,7 +285,7 @@ const Panel = (() => {
   // The server renders the report on request, so it carries the names saved since the analysis ran.
   const reportCache = {};
   function reportHtml(D) {
-    if (scope === 'pooled') {
+    if (curScope() === 'pooled') {
       const key = [V.names.A, V.names.B].join('|');
       if (!(key in pooled.report)) {
         pooled.report[key] = undefined;

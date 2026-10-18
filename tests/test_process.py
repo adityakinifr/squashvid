@@ -103,3 +103,21 @@ def test_failing_stage_names_itself(tmp_path):
 
     with pytest.raises(RuntimeError, match="stage 'a' failed.*bad"):
         execute([Stage("a", lambda: [tmp_path / "a"], boom)], out=lambda *_: None)
+
+
+def test_pinned_venue_wins_over_frame_size(tmp_path, monkeypatch):
+    from squashvid.calib.venue import Venue
+    from squashvid.process import pin_venue, resolve_venue
+
+    monkeypatch.setattr(clips, "WORK", tmp_path)
+    court5 = Venue.load(clips.VENUE_1080)
+    court5.save(tmp_path / clips.VENUE_1080.name)
+    assert resolve_venue("new_clip", (1920, 1080)).name == clips.VENUE_1080.name
+    other = tmp_path / "venue_other.json"
+    Venue("other", court5.spec.with_(width=6.3), 1160.0, court5.cx, court5.cy, court5.dist, image_size=(1920, 1080)).save(other)
+    pinned = pin_venue("new_clip", other, (1920, 1080))
+    assert pinned == tmp_path / "new_clip" / clips.VENUE_SIDECAR
+    assert resolve_venue("new_clip", (1920, 1080)) == pinned == clips.venue_path("new_clip")
+    assert Venue.load(pinned).name == "other"
+    with pytest.raises(ValueError, match="calibrated for 1920x1080"):
+        pin_venue("small", other, (1024, 576))

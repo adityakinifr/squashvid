@@ -20,6 +20,7 @@ Each stage skips itself when its outputs exist. `--from S` forces S and every la
 | ball | `ball.predict.run_full`, `blurball-ft:final@576x1024`, Core ML, 60 s chunks | `ball/blurball-ft-final@576x1024-coreml.parquet`, `ball/cands/` |
 | balltrack | `balltrack.__main__.run` | `ball_track.parquet`, `ball_events.parquet`, `ball_3d.parquet` |
 | analysis | `analysis.run.run` | `analysis/` (rallies, hits, stats, insights, report) |
+| bodies | `bodies.run.run` (MotionBERT lift on MPS) | `bodies.parquet` (3D joints for the viewer's player figures) |
 | viewer | `viewer.proxy.make_proxy` + `viewer.export.export` | `proxy.mp4`, `viewer/` |
 
 The ball output is saved per chunk, so an interrupted run leaves a partial file; the stage counts it as done only when it reaches the last frame, otherwise it reruns (finished chunks are merged by frame).
@@ -28,7 +29,7 @@ Without `hit_labels.csv` there is no `audio_eval.json`, so the balltrack audio o
 
 ## Limits
 
-- **Court 5 only.** The seed pose (`register.SEED_POSE`) and the venue files belong to the phone behind the back glass of court 5. A frame size with no venue file stops the run before any work ("a new court needs a venue calibration"). Same size on another court or mount is not detected: check `camera_summary.json` (`match_frac_median` around 0.78 is normal; the command warns below 0.5).
+- **Court 5 by default.** The seed pose (`register.SEED_POSE`) and the venue files belong to the phone behind the back glass of court 5. Another court needs a venue first: `python -I -m squashvid.calib.new_venue <video> <clicks.json> --name NAME --out work/venue_NAME_1080p.json` (landmark clicks on one frame; the phone may pan and tilt), then `--venue` on this command, which pins it to the clip in `work/<stem>/venue.json`. A frame size with no venue file stops the run before any work. Same size on another court without `--venue` is not detected: check `camera_summary.json` (`match_frac_median` around 0.78 is normal; the command warns below 0.5).
 - Players are not named; identity is fitted per clip.
 
 ## Timings

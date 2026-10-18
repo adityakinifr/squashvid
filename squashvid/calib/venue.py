@@ -39,6 +39,7 @@ class Venue:
     n_frames: int = 0
     notes: dict = field(default_factory=dict)
     image_size: tuple[int, int] | None = None  # (width, height) the intrinsics belong to
+    seed: tuple[np.ndarray, np.ndarray] | None = None  # (rvec, tvec) near a clip's first frame; registration starts here
 
     @property
     def size(self) -> tuple[int, int]:
@@ -59,7 +60,7 @@ class Venue:
         if abs(height / h - s) > 1e-3:
             raise ValueError(f"{w}x{h} -> {width}x{height} is not a uniform rescale")
         # Pixel centres map as (x + 0.5) * s - 0.5, the convention resize uses.
-        return Venue(self.name, self.spec, self.f * s, (self.cx + 0.5) * s - 0.5, (self.cy + 0.5) * s - 0.5, self.dist.copy(), self.rms * s, self.n_frames, dict(self.notes), (width, height))
+        return Venue(self.name, self.spec, self.f * s, (self.cx + 0.5) * s - 0.5, (self.cy + 0.5) * s - 0.5, self.dist.copy(), self.rms * s, self.n_frames, dict(self.notes), (width, height), self.seed)
 
     def to_dict(self) -> dict:
         return {
@@ -73,12 +74,14 @@ class Venue:
             "n_frames": self.n_frames,
             "notes": self.notes,
             "image_size": list(self.size),
+            **({"seed": {"rvec": [float(x) for x in self.seed[0]], "tvec": [float(x) for x in self.seed[1]]}} if self.seed is not None else {}),
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "Venue":
         size = tuple(d["image_size"]) if d.get("image_size") else None
-        return cls(d["name"], court.CourtSpec(**d["spec"]), d["f"], d["cx"], d["cy"], np.asarray(d["dist"], np.float64), d.get("rms", float("nan")), d.get("n_frames", 0), d.get("notes", {}), size)
+        seed = (np.asarray(d["seed"]["rvec"], np.float64), np.asarray(d["seed"]["tvec"], np.float64)) if d.get("seed") else None
+        return cls(d["name"], court.CourtSpec(**d["spec"]), d["f"], d["cx"], d["cy"], np.asarray(d["dist"], np.float64), d.get("rms", float("nan")), d.get("n_frames", 0), d.get("notes", {}), size, seed)
 
     def save(self, path: str | Path) -> Path:
         path = Path(path)
@@ -113,6 +116,37 @@ def collect_frames(sources: dict[str, tuple[Video, list[float]]], seed: Camera, 
     return out
 
 
+def collect_frames_chained(
+    video: Video, name: str, seed: Camera, seed_t: float, times: list[float], spec: court.CourtSpec, step: float = 0.25, min_match: float = 0.55
+) -> list[VenueFrame]:
+    """Like collect_frames for a phone that moves during the clip: walk outward from seed_t in `step` seconds,
+    starting each frame from its neighbour's pose, and keep the frames nearest the requested times.
+
+    A frame whose refined match is weak gets the coarse search from its neighbour first (as registration does);
+    a requested time is only kept once a frame near it matches at least min_match of the visible lines.
+    """
+    samples = model_samples(spec=spec)
+    end = video.info.duration
+    want = sorted(times)
+    keep: dict[float, VenueFrame] = {}
+    for direction in (1.0, -1.0):
+        prev = seed
+        walk = np.arange(seed_t, end if direction > 0 else -1e-9, direction * step)
+        for t in walk[0 if direction > 0 else 1 :]:
+            _, pts, img = video.frame_at(float(t))
+            maps = response_maps(img)
+            fit = refine_joint([prev], [maps], samples, radii=(8.0, 5.0, 3.0), spec=spec)
+            if fit.frames[0].match_frac < 0.45:
+                alt = refine_joint([coarse_align(prev, maps, samples, spec).camera], [maps], samples, radii=(10.0, 6.0, 4.0, 3.0), spec=spec)
+                if alt.frames[0].n_inliers > fit.frames[0].n_inliers:
+                    fit = alt
+            prev = fit.cameras[0]
+            near = min(want, key=lambda w: abs(w - t))
+            if abs(near - t) < 2.0 and near not in keep and fit.frames[0].match_frac >= min_match:
+                keep[near] = VenueFrame(name, pts, maps, prev)
+    return [keep[t] for t in sorted(keep)]
+
+
 def scan_width(frames: list[VenueFrame], spec: court.CourtSpec, widths: np.ndarray, max_frames: int = 6, lines: set[str] | None = None) -> tuple[float, dict[float, int]]:
     """Pick the court width with the most line inliers after a pose+focal fit at each candidate.
 
@@ -141,8 +175,21 @@ def calibrate_venue(
     widths: np.ndarray | None = None,
     free_spec: tuple[str, ...] = FREE_SPEC,
 ) -> tuple[Venue, list[VenueFrame]]:
+    return fit_venue(name, collect_frames(sources, seed, base), base, widths, free_spec)
+
+
+def fit_venue(
+    name: str,
+    frames: list[VenueFrame],
+    base: court.CourtSpec = court.WSF,
+    widths: np.ndarray | None = None,
+    free_spec: tuple[str, ...] = FREE_SPEC,
+) -> tuple[Venue, list[VenueFrame]]:
+    """Scan the court width, then fit shared intrinsics, court dimensions and every frame's pose together.
+
+    The returned venue's seed is the earliest frame's pose.
+    """
     widths = np.round(np.arange(base.width - 0.46, base.width + 0.22, 0.04), 3) if widths is None else widths
-    frames = collect_frames(sources, seed, base)
     sizes = {f.maps.shape for f in frames}
     if len(sizes) != 1:
         raise ValueError(f"venue frames differ in size: {sorted(sizes)}; calibrate each resolution separately")
@@ -157,6 +204,7 @@ def calibrate_venue(
     for fr, cam in zip(frames, joint.cameras):
         fr.camera = cam
     c = joint.cameras[0]
+    first = min(frames, key=lambda fr: fr.t)
     venue = Venue(
         name,
         joint.spec,
@@ -168,5 +216,6 @@ def calibrate_venue(
         len(frames),
         {"width_scan": {f"{k:.2f}": v for k, v in support.items()}, "frame_rms": [round(r.rms, 3) for r in joint.frames]},
         (width_px, height),
+        (first.camera.rvec.copy(), first.camera.tvec.copy()),
     )
     return venue, frames

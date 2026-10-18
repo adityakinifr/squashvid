@@ -87,7 +87,13 @@ def is_original(stem: str) -> bool:
     return stem in COPIES or (stem not in CLIPS and frame_size(stem)[0] == 1920)
 
 
+VENUE_SIDECAR = "venue.json"  # work/<stem>/venue.json: the venue a clip was registered with (`process --venue`)
+
+
 def venue_path(stem: str) -> Path:
+    pinned = WORK / stem / VENUE_SIDECAR
+    if pinned.exists():
+        return pinned
     if stem in CLIPS:
         return VENUE_1080 if is_original(stem) else VENUE
     return venue_for_size(*frame_size(stem))

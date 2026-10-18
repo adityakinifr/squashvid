@@ -83,17 +83,27 @@
   async function loadSettings() {
     try {
       const s = await (await fetch(URLS.settings)).json();
-      V.names = { ...V.names, ...s.names };
+      V.sharedNames = { ...V.names, ...s.names }; V.clipNames = s.clip_names || {};
+      V.names = { ...V.sharedNames };
       if (s.looks) { V.looks = s.looks; $('look-A').textContent = `(${s.looks.A})`; $('look-B').textContent = `(${s.looks.B})`; $('names-btn').title = `Name the players: A wears the ${s.looks.A}, B the ${s.looks.B}`; }
     } catch (e) { console.warn('settings', e); }
+    fillNames();
+  }
+  // A clip of other people has its own names (settings clip_names); every other clip shows the shared ones.
+  function useClipNames(stem) {
+    const own = V.clipNames?.[stem];
+    V.names = own ? { A: 'Player A', B: 'Player B', ...own } : { ...V.sharedNames };
+    fillNames();
+  }
+  function fillNames() {
     // A blank box keeps the default label; the server stores 'Player A' / 'Player B' for blanks.
     $('name-A').value = V.names.A === 'Player A' ? '' : V.names.A; $('name-B').value = V.names.B === 'Player B' ? '' : V.names.B;
   }
   $('names-btn').hidden = !!window.SV_STATIC;  // a static build has no server to save names to
   $('names-btn').addEventListener('click', () => { $('names-form').hidden = !$('names-form').hidden; });
   $('names-save').addEventListener('click', async () => {
-    const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: { A: $('name-A').value, B: $('name-B').value } }) });
-    if (r.ok) { V.names = { ...V.names, ...(await r.json()).names }; $('names-form').hidden = true; TopView.rebuild(); Panel.render(); renderFrame(V.frame, true); }
+    const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ names: { A: $('name-A').value, B: $('name-B').value }, stem: V.D?.stem }) });
+    if (r.ok) { const s = await r.json(); V.sharedNames = { ...V.sharedNames, ...s.names }; V.clipNames = s.clip_names || {}; useClipNames(V.D?.stem); $('names-form').hidden = true; TopView.rebuild(); Panel.render(); renderFrame(V.frame, true); }
   });
 
   // ---- clip loading ----
@@ -101,7 +111,7 @@
     $('status').textContent = `loading ${stem}…`;
     video.pause();
     const D = await loadClip(stem);
-    V.D = D; annotateEvents(D);
+    V.D = D; annotateEvents(D); useClipNames(stem);
     video.src = URLS.video(stem);
     View3D.buildCourt(D); TopView.rebuild(); FrontView.rebuild(); Timeline.invalidate();
     Panel.render();

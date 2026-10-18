@@ -14,14 +14,20 @@ from squashvid.analysis.stats import NEAR_TIN_M
 log = logging.getLogger(__name__)
 
 
-def names(work: Path = WORK) -> dict[str, str]:
-    """Player names saved by the viewer's Names button (work/viewer_settings.json, {"names": {"A": ..., "B": ...}})."""
+def names(work: Path = WORK, stem: str | None = None) -> dict[str, str]:
+    """Player names saved by the viewer's Names button (work/viewer_settings.json, {"names": {"A": ..., "B": ...}}).
+
+    A clip of other people carries its own under "clip_names": {stem: {"A": ...}}; that clip shows only those,
+    with the default label for a player it leaves unnamed.
+    """
     out = {"A": "Player A", "B": "Player B"}
     try:
-        saved = json.loads((work / "viewer_settings.json").read_text()).get("names", {})
+        data = json.loads((work / "viewer_settings.json").read_text())
     except (OSError, ValueError):
         return out
-    out.update({k: v.strip() for k, v in saved.items() if k in out and isinstance(v, str) and v.strip()})
+    own = (data.get("clip_names") or {}).get(stem) if stem else None
+    for saved in [own] if isinstance(own, dict) else [data.get("names") or {}]:
+        out.update({k: v.strip() for k, v in saved.items() if k in out and isinstance(v, str) and v.strip()})
     return out
 
 
@@ -180,7 +186,7 @@ def coaching(ins: dict, nm: dict[str, str], stem: str | None = None) -> list[str
 
 
 def render(stem: str, stats: dict, ins: dict, title: str | None = None, nm: dict[str, str] | None = None) -> str:
-    nm = nm or names()
+    nm = nm or names(stem=stem)
     mt = stats["match"]
     lines = [
         f"# Match report: {title or stem}",
@@ -237,14 +243,18 @@ def clip_report(work: Path, stem: str, nm: dict[str, str] | None = None) -> str 
         stats, ins = json.loads((a / "stats.json").read_text()), json.loads((a / "insights.json").read_text())
     except (OSError, ValueError):
         return None
-    return render(stem, stats, ins, nm=nm or names(work))
+    return render(stem, stats, ins, nm=nm or names(work, stem))
 
 
 def rewrite_all(work: Path = WORK) -> list[Path]:
     """Re-render every report.md under work/ with the saved names; the numbers are not recomputed."""
     nm, out = names(work), []
     for d in sorted(p for p in work.iterdir() if (p / "analysis" / "insights.json").exists() and (p / "analysis" / "stats.json").exists()):
-        md = clip_report(work, d.name, nm)
+        try:
+            md = clip_report(work, d.name)
+        except (KeyError, TypeError, ValueError) as e:  # an analysis from an older format; rerun it to refresh
+            log.warning("%s report not rewritten: %s", d.name, e)
+            continue
         if md is not None:
             (d / "analysis" / "report.md").write_text(md)
             out.append(d / "analysis" / "report.md")

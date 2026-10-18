@@ -1,10 +1,12 @@
-"""One command from a new court-5 video to everything the viewer needs.
+"""One command from a new video to everything the viewer needs.
 
-    python -I -m squashvid.process <video> [--stem NAME] [--from STAGE] [--only STAGE]
+    python -I -m squashvid.process <video> [--stem NAME] [--venue VENUE_JSON] [--from STAGE] [--only STAGE]
 
 Stages run in order and each skips itself when its outputs already exist, unless
 --from (that stage and every later one) or --only (just that one) forces it. The
 video is recorded in work/clips.json so the per-stage modules can find it by stem.
+--venue pins a venue (another court or mount) by copying it to work/<stem>/venue.json;
+without it a clip uses its pinned venue, else the court-5 venue of its frame size.
 """
 
 from __future__ import annotations
@@ -90,7 +92,7 @@ def build_stages(stem: str, video_path: Path, venue_json: Path, work: Path | Non
     def players() -> dict:
         from squashvid.players.__main__ import run
 
-        run(video_path, stem=stem, work=w)
+        run(video_path, stem=stem, venue_json=str(venue_json), work=w)
         return {}
 
     def audio() -> dict:
@@ -121,6 +123,12 @@ def build_stages(stem: str, video_path: Path, venue_json: Path, work: Path | Non
 
         return run.run(stem)
 
+    def bodies() -> dict:
+        from squashvid.bodies.run import run
+
+        s = run(stem, device="mps")
+        return {"stature_m": {p: d.get("stature_m_p90") for p, d in s["players"].items()}}
+
     def viewer() -> dict:
         from squashvid.viewer import proxy
         from squashvid.viewer.export import export
@@ -134,17 +142,35 @@ def build_stages(stem: str, video_path: Path, venue_json: Path, work: Path | Non
         Stage("ball", lambda: [w / "ball" / f"{BALL_VARIANT}.parquet"], ball, ball_complete),
         Stage("balltrack", lambda: [w / "ball_track.parquet", w / "ball_events.parquet"], balltrack),
         Stage("analysis", lambda: [w / "analysis" / "report.md", w / "analysis" / "stats.json"], analysis),
+        Stage("bodies", lambda: [w / "bodies.parquet"], bodies),
         Stage("viewer", lambda: [w / "proxy.mp4", w / "viewer" / "meta.json"], viewer),
     ]
 
 
-STAGE_NAMES = ("register", "players", "audio", "ball", "balltrack", "analysis", "viewer")
+def pin_venue(stem: str, venue_json: Path, size: tuple[int, int], work: Path | None = None) -> Path:
+    """Copy venue_json to <work>/<stem>/venue.json after checking its intrinsics belong to this frame size."""
+    from squashvid.calib.venue import Venue
+
+    venue = Venue.load(venue_json)
+    if tuple(venue.size) != tuple(size):
+        raise ValueError(f"{venue_json} is calibrated for {venue.size[0]}x{venue.size[1]}, the video is {size[0]}x{size[1]}")
+    return venue.save((work or clips.WORK) / stem / clips.VENUE_SIDECAR)
+
+
+def resolve_venue(stem: str, size: tuple[int, int], work: Path | None = None) -> Path:
+    """The clip's pinned venue, else the court-5 venue of its frame size."""
+    pinned = (work or clips.WORK) / stem / clips.VENUE_SIDECAR
+    return pinned if pinned.exists() else clips.venue_for_size(*size, work)
+
+
+STAGE_NAMES = ("register", "players", "audio", "ball", "balltrack", "analysis", "bodies", "viewer")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -I -m squashvid.process", description=__doc__.split("\n\n")[0])
     p.add_argument("video")
     p.add_argument("--stem", default=None, help="name for the work directory (default: the file name without extension)")
+    p.add_argument("--venue", default=None, help="venue file for a court other than court 5; pinned to the clip for later runs")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--from", dest="start", choices=STAGE_NAMES, help="rerun this stage and every later one")
     g.add_argument("--only", choices=STAGE_NAMES, help="rerun just this stage")
@@ -158,8 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     stem = a.stem or video_path.stem
     info = probe(video_path)
     try:
-        venue_json = clips.venue_for_size(info.width, info.height)
-    except FileNotFoundError as e:
+        venue_json = pin_venue(stem, Path(a.venue).expanduser(), (info.width, info.height)) if a.venue else resolve_venue(stem, (info.width, info.height))
+    except (FileNotFoundError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if stem in clips.CLIPS and clips.clip_path(stem).resolve() != video_path:

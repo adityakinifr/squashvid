@@ -88,6 +88,18 @@ def test_coarse_align_recovers_a_pan_far_outside_refinement_range(scene):
     assert motion_px(fit.cameras[0], cam, probe) < 0.5
 
 
+def test_coarse_align_recovers_a_hand_held_tilt(scene):
+    cam, maps = scene
+    samples = model_samples(spec=TRUE)
+    R = cv2.Rodrigues(np.array([0.09, 0.0, 0.0]))[0] @ cam.R  # tilt about the camera's own horizontal axis
+    start = cam.copy(rvec=cv2.Rodrigues(R)[0].reshape(3), tvec=-R @ cam.centre)
+    probe = _probe_points(Venue("t", TRUE, cam.f, cam.cx, cam.cy, cam.dist))
+    assert motion_px(start, cam, probe) > 40
+    coarse = coarse_align(start, maps, samples, TRUE).camera
+    fit = refine_joint([coarse], [maps], samples, radii=(8, 5, 3, 2), spec=TRUE)
+    assert motion_px(fit.cameras[0], cam, probe) < 0.5
+
+
 def test_width_scan_finds_a_narrow_court_that_a_wsf_start_cannot(scene):
     cam, maps = scene
     wsf_samples = model_samples(spec=court.WSF.with_(length=TRUE.length))
@@ -134,7 +146,11 @@ def test_venue_round_trips_through_json(tmp_path):
     v = Venue("court5", TRUE, 478.0, 512.0, 288.0, np.array([0.05, -0.03, 0, 0, 0]), 0.43, 17, {"k": 1}, (1024, 576))
     back = Venue.load(v.save(tmp_path / "venue.json"))
     assert back.spec == v.spec and back.f == v.f and np.allclose(back.dist, v.dist) and back.notes == v.notes
-    assert back.size == (1024, 576)
+    assert back.size == (1024, 576) and back.seed is None
+    seeded = Venue("other", TRUE, 1160.0, 959.5, 539.5, np.zeros(5), image_size=(1920, 1080), seed=(np.array([1.6, 0.0, 0.02]), np.array([-3.0, 1.2, 2.0])))
+    again = Venue.load(seeded.save(tmp_path / "seeded.json"))
+    assert np.allclose(again.seed[0], seeded.seed[0]) and np.allclose(again.seed[1], seeded.seed[1])
+    assert np.allclose(again.resized(960, 540).seed[1], seeded.seed[1])
 
 
 def test_venue_without_a_recorded_size_assumes_a_centred_principal_point():

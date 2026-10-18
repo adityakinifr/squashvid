@@ -113,3 +113,17 @@ def test_pooled_coaching_is_served_with_the_saved_names(client):
     c.post("/api/settings", json={"names": {"A": "Deepti"}})
     md = c.get("/api/pooled/report").json()["markdown"]
     assert "Deepti spent 16% of rally time near the T." in md and "before Player B hits" in md
+
+
+def test_a_clip_of_other_people_keeps_its_own_names(client):
+    c, work = client
+    a = _analysis(work)
+    settings = {"names": {"A": "Opp", "B": "Raul"}, "clip_names": {"clip": {"A": "Raul"}}}
+    (work / "viewer_settings.json").write_text(json.dumps(settings))
+    assert c.get("/api/settings").json()["clip_names"] == {"clip": {"A": "Raul"}}
+    assert "Raul was 2.0 m from the T, against 1.7 m for Player B." in c.get("/api/clip/report").json()["markdown"]
+    r = c.post("/api/settings", json={"names": {"A": "Raul", "B": "Coach"}, "stem": "clip"}).json()
+    assert r["clip_names"]["clip"] == {"A": "Raul", "B": "Coach"} and r["names"] == {"A": "Opp", "B": "Raul"}
+    assert "against 1.7 m for Coach." in (a / "report.md").read_text()
+    c.post("/api/settings", json={"names": {"A": "Deepti"}, "stem": "other"})
+    assert c.get("/api/settings").json()["names"]["A"] == "Deepti"  # a clip without its own names saves the shared ones

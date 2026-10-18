@@ -29,7 +29,7 @@ REACQUIRE_RMS = 1.2  # reference px (see lines.REFERENCE_WIDTH)
 JUMP_PX = 3.0  # reference px of frame-to-frame court motion that starts a new segment
 SMOOTH_FRAMES = 9
 # Where the phone sits behind the back glass of court 5 (IMG_4091 frame 0). Every clip so far starts within a few cm and
-# degrees of this, and the first frame's coarse search covers that spread; a different court or mount needs its own seed.
+# degrees of this, and the first frame's coarse search covers that spread. A venue fitted later carries its own seed.
 SEED_POSE = (
     np.array([1.633313124097702, -0.004703997290973849, 0.02261087069225295]),
     np.array([-2.8095257861677725, 1.234736875538943, 2.0130706223337573]),
@@ -175,9 +175,9 @@ def summarise(df: pd.DataFrame) -> dict:
 
 
 def register_video(video: Video, venue: Venue, out_dir: str | Path, progress=None) -> dict:
-    """Track every frame from SEED_POSE, smooth within segments, write camera.parquet and camera_summary.json."""
+    """Track every frame from the venue's seed (court 5: SEED_POSE), smooth within segments, write camera.parquet and camera_summary.json."""
     out_dir = Path(out_dir)
-    poses = track(video, venue, venue.camera(*SEED_POSE), progress=progress)
+    poses = track(video, venue, venue.camera(*(venue.seed or SEED_POSE)), progress=progress)
     df = segment_and_smooth(to_frame(poses), venue)
     save(df, out_dir / "camera.parquet")
     summary = summarise(df)
