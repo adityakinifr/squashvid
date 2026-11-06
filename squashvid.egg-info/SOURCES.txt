@@ -10,6 +10,12 @@ squashvid.egg-info/dependency_links.txt
 squashvid.egg-info/entry_points.txt
 squashvid.egg-info/requires.txt
 squashvid.egg-info/top_level.txt
+squashvid/calib/__init__.py
+squashvid/geom/__init__.py
+squashvid/geom/camera.py
+squashvid/geom/court.py
+squashvid/media/__init__.py
+squashvid/media/video.py
 squashvid/pipeline/__init__.py
 squashvid/pipeline/events.py
 squashvid/pipeline/llm.py
@@ -20,4 +26,8 @@ squashvid/pipeline/video_source.py
 squashvid/pipeline/vision.py
 tests/test_api_ui.py
 tests/test_events.py
+tests/test_llm.py
+tests/test_orchestrator.py
+tests/test_preprocess.py
 tests/test_video_source.py
+tests/test_vision.py

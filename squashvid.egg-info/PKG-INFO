@@ -31,7 +31,9 @@ This project implements the architecture you described:
 
 - Splits a full match video into rally candidates.
 - Extracts per-rally shot proxies (drive, crosscourt, volley drop, boast).
-- Computes movement proxies (T recovery, T occupancy, court coverage).
+- Computes movement proxies (T recovery, T occupancy, court coverage, normalized speed, late retrievals).
+- Builds match-intelligence diagnostics (outcome proxy, phase drift, repeated shot sequences, player pressure profiles).
+- Produces a coach review pack with high-leverage rally windows and a multimodal review prompt.
 - Aggregates tactical counters:
   - `backhand_pressure_rate`
   - `boast_usage`
@@ -72,7 +74,23 @@ squashvid analyze \
   --idle-gap-sec 1.3
 ```
 
+Speed-focused run for long YouTube videos:
+
+```bash
+squashvid analyze \
+  --video 'https://www.youtube.com/watch?v=VIDEO_ID' \
+  --output analysis.json \
+  --max-rallies 24 \
+  --segment-frame-step 2 \
+  --tracking-frame-step 4 \
+  --cv-workers 10 \
+  --max-video-minutes 12 \
+  --player-a-name "Aditya" \
+  --player-b-name "Opponent"
+```
+
 If `OPENAI_API_KEY` is available, the app calls OpenAI Responses API for coaching insight. Otherwise it returns a local heuristic insight report.
+In the web UI, you can also paste an OpenAI API key per request in the **OpenAI API Key (optional)** field.
 
 You can also pass a YouTube URL directly:
 
@@ -101,6 +119,27 @@ squashvid-api
 
 Then open the UI at: `http://localhost:8000/`
 
+UI includes a **Rally Review Scrubber**:
+- scrubber/video sits directly under rally filters in the Rally Timeline section
+- click any rally card to load that rally
+- video view is cropped to the inferred rally focus area
+- shot markers appear on the scrubber timeline and are clickable
+- selected rally panel shows full shot-by-shot details
+- preview controls let you adjust selected rally start/end bounds locally
+- saved boundary corrections can be re-run so shots, metrics, and coaching output are recomputed
+- correction controls support merging the next rally, deleting false rally windows, and adding a missing rally window
+- rally grid supports sorting by match order, longest, shortest, or most shots
+- rally picker lets you jump directly to a specific rally number
+- filters include winner, rally-length range, and shot-count range
+- player names are configurable (A/B labels become custom names across UI + insights)
+- coaching insights are rendered as visual cards for patterns, drills, and full written report sections
+- advanced controls include CV worker-process count, start minute, and optional duration
+- optional court calibration lets you override court crop and T position with normalized frame coordinates
+- selected rally details include a court-normalized movement map and expanded movement tags
+- match intelligence panel shows outcome split, player pressure profiles, repeated sequences, risk flags, and phase drift
+- coach review pack selects high-leverage rallies and exports JSON/report artifacts for follow-up review
+- segmentation diagnostics show analyzed window, threshold choice, signal source, bridge behavior, motion preview, candidate segments, and fallback usage
+
 Analyze by file path:
 
 ```bash
@@ -119,7 +158,37 @@ curl -X POST http://localhost:8000/analyze/path \
 # with explicit cache dir
 curl -X POST http://localhost:8000/analyze/path \
   -H 'Content-Type: application/json' \
-  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"youtube_cache_dir":"/absolute/path/to/cache","motion_threshold":0.018,"min_rally_sec":4.0,"idle_gap_sec":1.2,"max_rallies":30}'
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"youtube_cache_dir":"/absolute/path/to/cache","motion_threshold":0.018,"min_rally_sec":4.0,"idle_gap_sec":1.2,"max_rallies":30,"segment_frame_step":2,"tracking_frame_step":4}'
+
+# with CPU-parallel CV and first-N-minutes window
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"cv_workers":10,"max_video_minutes":12}'
+
+# with explicit start/end analysis window
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"analysis_start_minute":4,"max_video_minutes":8}'
+
+# with manual rally boundaries, bypassing automatic segmentation
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"manual_segments":[{"rally_id":1,"start_sec":0.4,"end_sec":34.0,"corrected":true}]}'
+
+# with manual court calibration using normalized full-frame coordinates
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":false,"court_calibration":{"x":0.08,"y":0.04,"w":0.84,"h":0.90,"t_x":0.50,"t_y":0.62}}'
+
+# with per-request API key override
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"openai_api_key":"sk-..."}'
+
+# with player naming
+curl -X POST http://localhost:8000/analyze/path \
+  -H 'Content-Type: application/json' \
+  -d '{"video_path":"https://www.youtube.com/watch?v=VIDEO_ID","include_llm":true,"player_a_name":"Aditya","player_b_name":"Opponent"}'
 ```
 
 Analyze by upload:
@@ -145,11 +214,24 @@ curl -X POST http://localhost:8000/analyze/upload \
   ],
   "positions": {
     "A_avg_T_recovery_sec": 0.82,
-    "B_avg_T_recovery_sec": 1.14
+    "B_avg_T_recovery_sec": 1.14,
+    "A_court_coverage": 0.24,
+    "B_court_coverage": 0.31,
+    "A_avg_speed": 0.42,
+    "B_avg_speed": 0.49,
+    "A_late_retrievals": 2,
+    "B_late_retrievals": 4
   },
-  "outcome": "A winner"
+  "outcome": "A winner",
+  "metadata": {
+    "outcome_model": {"winner": "A", "loser": "B", "category": "winner"},
+    "pressure": {"intensity_score": 0.64, "flags": [{"label": "Long Rally"}]}
+  }
 }
 ```
+
+`timeline.diagnostics.match_intelligence` contains player profiles, phase splits, repeated sequence patterns, risk flags, and `review_pack`.
+`timeline.diagnostics.review_pack` contains highlighted rally windows plus a prompt suitable for manual or multimodal review.
 
 ## Important Limitations
 
@@ -161,5 +243,5 @@ curl -X POST http://localhost:8000/analyze/upload \
 
 1. Replace heuristic ball tracking with a squash-specific detector/tracker.
 2. Add pose estimation and footwork labels (lunge, split-step timing).
-3. Train a rally outcome classifier (winner / forced / unforced error).
-4. Feed selected clips + structured timeline to a multimodal model for higher-fidelity coaching.
+3. Replace the heuristic outcome proxy with a trained rally outcome classifier (winner / forced / unforced error).
+4. Feed review-pack clips + structured timeline to a multimodal model for higher-fidelity coaching.
