@@ -37,4 +37,8 @@ sk-proj-*/
 # youtube_cookies.txt
 
 # Pipeline work products (per-clip parquet, overlays, labels)
-work/
+work/*
+# Kept: the trained ball model and the court 5 calibration (logs hold local paths)
+!work/ball_ft/
+!work/venue_court5*.json
+work/ball_ft/**/*.log

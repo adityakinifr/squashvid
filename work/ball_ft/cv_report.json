@@ -1,0 +1,1361 @@
+{
+ "folds": {
+  "A": {
+   "train": [
+    "IMG_4089-r11",
+    "IMG_4090-r18",
+    "IMG_4090-r9",
+    "IMG_4091-r16"
+   ],
+   "test": [
+    "IMG_4091-r12",
+    "IMG_4089-r3"
+   ],
+   "run": "foldA"
+  },
+  "B": {
+   "train": [
+    "IMG_4089-r3",
+    "IMG_4090-r18",
+    "IMG_4090-r9",
+    "IMG_4091-r12"
+   ],
+   "test": [
+    "IMG_4091-r16",
+    "IMG_4089-r11"
+   ],
+   "run": "foldB"
+  },
+  "C": {
+   "train": [
+    "IMG_4089-r11",
+    "IMG_4089-r3",
+    "IMG_4091-r12",
+    "IMG_4091-r16"
+   ],
+   "test": [
+    "IMG_4090-r18",
+    "IMG_4090-r9"
+   ],
+   "run": "foldC"
+  }
+ },
+ "variants": {
+  "A": {
+   "IMG_4091-r12": "blurball-ft-foldA@576x1024-coreml",
+   "IMG_4089-r3": "blurball-ft-foldA@576x1024-coreml"
+  },
+  "B": {
+   "IMG_4091-r16": "blurball-ft-foldB@576x1024-coreml",
+   "IMG_4089-r11": "blurball-ft-foldB@576x1024-coreml"
+  },
+  "C": {
+   "IMG_4090-r18": "blurball-ft-foldC@576x1024-coreml",
+   "IMG_4090-r9": "blurball-ft-foldC@576x1024-coreml"
+  }
+ },
+ "counts": {
+  "IMG_4089-r11": 465,
+  "IMG_4089-r3": 465,
+  "IMG_4090-r18": 465,
+  "IMG_4090-r9": 465,
+  "IMG_4091-r12": 464,
+  "IMG_4091-r16": 465
+ },
+ "baseline": {
+  "tol4": [
+   {
+    "region": "front_wall",
+    "tp": 175,
+    "fp": 90,
+    "fn": 178,
+    "precision": 0.660377358490566,
+    "recall": 0.49575070821529743,
+    "f1": 0.5663430420711975,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 77,
+    "fp": 133,
+    "fn": 494,
+    "precision": 0.36666666666666664,
+    "recall": 0.13485113835376533,
+    "f1": 0.1971830985915493,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 0,
+    "fp": 191,
+    "fn": 238,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 2,
+    "fp": 61,
+    "fn": 151,
+    "precision": 0.031746031746031744,
+    "recall": 0.013071895424836602,
+    "f1": 0.018518518518518517,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 0,
+    "fp": 5,
+    "fn": 1,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 172,
+    "fp": 548,
+    "fn": 561,
+    "precision": 0.2388888888888889,
+    "recall": 0.23465211459754434,
+    "f1": 0.2367515485203028,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 426,
+    "fp": 1028,
+    "fn": 1623,
+    "precision": 0.29298486932599727,
+    "recall": 0.20790629575402636,
+    "f1": 0.24322009705966313,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ],
+  "tol7.5": [
+   {
+    "region": "front_wall",
+    "tp": 221,
+    "fp": 43,
+    "fn": 132,
+    "precision": 0.8371212121212122,
+    "recall": 0.6260623229461756,
+    "f1": 0.7163695299837927,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 106,
+    "fp": 104,
+    "fn": 465,
+    "precision": 0.5047619047619047,
+    "recall": 0.18563922942206654,
+    "f1": 0.2714468629961588,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 0,
+    "fp": 191,
+    "fn": 238,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 5,
+    "fp": 60,
+    "fn": 148,
+    "precision": 0.07692307692307693,
+    "recall": 0.032679738562091505,
+    "f1": 0.045871559633027525,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 0,
+    "fp": 5,
+    "fn": 1,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 210,
+    "fp": 509,
+    "fn": 523,
+    "precision": 0.29207232267037553,
+    "recall": 0.286493860845839,
+    "f1": 0.28925619834710736,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 542,
+    "fp": 912,
+    "fn": 1507,
+    "precision": 0.37276478679504815,
+    "recall": 0.2645192776964373,
+    "f1": 0.30944904367684845,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ],
+  "per_window": {
+   "IMG_4089-r11": {
+    "tp": 67,
+    "fp": 133,
+    "fn": 241,
+    "precision": 0.335,
+    "recall": 0.21753246753246752,
+    "f1": 0.2637795275590551,
+    "n": 465
+   },
+   "IMG_4089-r3": {
+    "tp": 59,
+    "fp": 157,
+    "fn": 255,
+    "precision": 0.27314814814814814,
+    "recall": 0.18789808917197454,
+    "f1": 0.22264150943396227,
+    "n": 465
+   },
+   "IMG_4090-r18": {
+    "tp": 113,
+    "fp": 140,
+    "fn": 249,
+    "precision": 0.44664031620553357,
+    "recall": 0.31215469613259667,
+    "f1": 0.367479674796748,
+    "n": 465
+   },
+   "IMG_4090-r9": {
+    "tp": 78,
+    "fp": 161,
+    "fn": 276,
+    "precision": 0.3263598326359833,
+    "recall": 0.22033898305084745,
+    "f1": 0.2630691399662732,
+    "n": 465
+   },
+   "IMG_4091-r12": {
+    "tp": 125,
+    "fp": 146,
+    "fn": 202,
+    "precision": 0.4612546125461255,
+    "recall": 0.382262996941896,
+    "f1": 0.4180602006688964,
+    "n": 464
+   },
+   "IMG_4091-r16": {
+    "tp": 100,
+    "fp": 175,
+    "fn": 284,
+    "precision": 0.36363636363636365,
+    "recall": 0.2604166666666667,
+    "f1": 0.3034901365705615,
+    "n": 465
+   }
+  },
+  "median_err_px_tp": 2.249914906632257,
+  "tol15": [
+   {
+    "region": "front_wall",
+    "tp": 228,
+    "fp": 36,
+    "fn": 125,
+    "precision": 0.8636363636363636,
+    "recall": 0.6458923512747875,
+    "f1": 0.7390599675850892,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 118,
+    "fp": 92,
+    "fn": 453,
+    "precision": 0.5619047619047619,
+    "recall": 0.20665499124343256,
+    "f1": 0.3021766965428937,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 0,
+    "fp": 191,
+    "fn": 238,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 6,
+    "fp": 59,
+    "fn": 147,
+    "precision": 0.09230769230769231,
+    "recall": 0.0392156862745098,
+    "f1": 0.05504587155963303,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 0,
+    "fp": 5,
+    "fn": 1,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 222,
+    "fp": 497,
+    "fn": 511,
+    "precision": 0.3087621696801113,
+    "recall": 0.30286493860845837,
+    "f1": 0.3057851239669422,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 574,
+    "fp": 880,
+    "fn": 1475,
+    "precision": 0.3947730398899587,
+    "recall": 0.28013665202537824,
+    "f1": 0.32771909791607196,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ]
+ },
+ "finetuned": {
+  "tol4": [
+   {
+    "region": "front_wall",
+    "tp": 258,
+    "fp": 59,
+    "fn": 95,
+    "precision": 0.8138801261829653,
+    "recall": 0.7308781869688386,
+    "f1": 0.7701492537313434,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 265,
+    "fp": 36,
+    "fn": 306,
+    "precision": 0.8803986710963455,
+    "recall": 0.46409807355516636,
+    "f1": 0.6077981651376146,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 28,
+    "fp": 5,
+    "fn": 210,
+    "precision": 0.8484848484848485,
+    "recall": 0.11764705882352941,
+    "f1": 0.2066420664206642,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 47,
+    "fp": 9,
+    "fn": 106,
+    "precision": 0.8392857142857143,
+    "recall": 0.30718954248366015,
+    "f1": 0.4497607655502393,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 383,
+    "fp": 66,
+    "fn": 350,
+    "precision": 0.8530066815144766,
+    "recall": 0.5225102319236017,
+    "f1": 0.6480541455160745,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 982,
+    "fp": 175,
+    "fn": 1067,
+    "precision": 0.8487467588591184,
+    "recall": 0.4792581747193753,
+    "f1": 0.6126013724266999,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ],
+  "tol7.5": [
+   {
+    "region": "front_wall",
+    "tp": 298,
+    "fp": 16,
+    "fn": 55,
+    "precision": 0.9490445859872612,
+    "recall": 0.8441926345609065,
+    "f1": 0.8935532233883059,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 295,
+    "fp": 7,
+    "fn": 276,
+    "precision": 0.9768211920529801,
+    "recall": 0.5166374781085814,
+    "f1": 0.6758304696449027,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 33,
+    "fp": 0,
+    "fn": 205,
+    "precision": 1.0,
+    "recall": 0.13865546218487396,
+    "f1": 0.24354243542435428,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 54,
+    "fp": 3,
+    "fn": 99,
+    "precision": 0.9473684210526315,
+    "recall": 0.35294117647058826,
+    "f1": 0.5142857142857143,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 419,
+    "fp": 31,
+    "fn": 314,
+    "precision": 0.9311111111111111,
+    "recall": 0.5716234652114598,
+    "f1": 0.7083685545224008,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 1100,
+    "fp": 57,
+    "fn": 949,
+    "precision": 0.9507346585998271,
+    "recall": 0.5368472425573451,
+    "f1": 0.6862133499688086,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ],
+  "per_window": {
+   "IMG_4089-r11": {
+    "tp": 186,
+    "fp": 16,
+    "fn": 122,
+    "precision": 0.9207920792079208,
+    "recall": 0.6038961038961039,
+    "f1": 0.7294117647058824,
+    "n": 465
+   },
+   "IMG_4089-r3": {
+    "tp": 98,
+    "fp": 15,
+    "fn": 216,
+    "precision": 0.8672566371681416,
+    "recall": 0.31210191082802546,
+    "f1": 0.459016393442623,
+    "n": 465
+   },
+   "IMG_4090-r18": {
+    "tp": 218,
+    "fp": 6,
+    "fn": 144,
+    "precision": 0.9732142857142857,
+    "recall": 0.6022099447513812,
+    "f1": 0.7440273037542662,
+    "n": 465
+   },
+   "IMG_4090-r9": {
+    "tp": 170,
+    "fp": 1,
+    "fn": 184,
+    "precision": 0.9941520467836257,
+    "recall": 0.480225988700565,
+    "f1": 0.6476190476190476,
+    "n": 465
+   },
+   "IMG_4091-r12": {
+    "tp": 210,
+    "fp": 2,
+    "fn": 117,
+    "precision": 0.9905660377358491,
+    "recall": 0.6422018348623854,
+    "f1": 0.7792207792207793,
+    "n": 464
+   },
+   "IMG_4091-r16": {
+    "tp": 218,
+    "fp": 17,
+    "fn": 166,
+    "precision": 0.9276595744680851,
+    "recall": 0.5677083333333334,
+    "f1": 0.704361873990307,
+    "n": 465
+   }
+  },
+  "median_err_px_tp": 1.6694286847894533,
+  "tol15": [
+   {
+    "region": "front_wall",
+    "tp": 299,
+    "fp": 15,
+    "fn": 54,
+    "precision": 0.9522292993630573,
+    "recall": 0.8470254957507082,
+    "f1": 0.8965517241379312,
+    "n_visible": 353,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "side_walls",
+    "tp": 299,
+    "fp": 3,
+    "fn": 272,
+    "precision": 0.9900662251655629,
+    "recall": 0.5236427320490368,
+    "f1": 0.6849942726231386,
+    "n_visible": 571,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_back",
+    "tp": 33,
+    "fp": 0,
+    "fn": 205,
+    "precision": 1.0,
+    "recall": 0.13865546218487396,
+    "f1": 0.24354243542435428,
+    "n_visible": 238,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "floor_front",
+    "tp": 56,
+    "fp": 1,
+    "fn": 97,
+    "precision": 0.9824561403508771,
+    "recall": 0.3660130718954248,
+    "f1": 0.5333333333333332,
+    "n_visible": 153,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "air",
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "n_visible": 1,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "door_strip",
+    "tp": 424,
+    "fp": 26,
+    "fn": 309,
+    "precision": 0.9422222222222222,
+    "recall": 0.5784447476125512,
+    "f1": 0.7168216398985631,
+    "n_visible": 733,
+    "n_occluded": 0,
+    "occ_recall": null
+   },
+   {
+    "region": "all",
+    "tp": 1112,
+    "fp": 45,
+    "fn": 937,
+    "precision": 0.9611063094209161,
+    "recall": 0.5427037579306979,
+    "f1": 0.69369931378665,
+    "n_visible": 2049,
+    "n_occluded": 0,
+    "occ_recall": null
+   }
+  ]
+ },
+ "per_fold": {
+  "A": {
+   "baseline": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 61,
+      "fp": 20,
+      "fn": 42,
+      "precision": 0.7530864197530864,
+      "recall": 0.5922330097087378,
+      "f1": 0.6630434782608695,
+      "n_visible": 103,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 33,
+      "fp": 49,
+      "fn": 76,
+      "precision": 0.4024390243902439,
+      "recall": 0.30275229357798167,
+      "f1": 0.34554973821989526,
+      "n_visible": 109,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 0,
+      "fp": 63,
+      "fn": 96,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_visible": 96,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 0,
+      "fp": 10,
+      "fn": 65,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_visible": 65,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": null,
+      "f1": 0.0,
+      "n_visible": 0,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 90,
+      "fp": 160,
+      "fn": 178,
+      "precision": 0.36,
+      "recall": 0.3358208955223881,
+      "f1": 0.34749034749034746,
+      "n_visible": 268,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 184,
+      "fp": 303,
+      "fn": 457,
+      "precision": 0.37782340862423,
+      "recall": 0.2870514820592824,
+      "f1": 0.3262411347517731,
+      "n_visible": 641,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4089-r3": {
+      "tp": 59,
+      "fp": 157,
+      "fn": 255,
+      "precision": 0.27314814814814814,
+      "recall": 0.18789808917197454,
+      "f1": 0.22264150943396227,
+      "n": 465
+     },
+     "IMG_4091-r12": {
+      "tp": 125,
+      "fp": 146,
+      "fn": 202,
+      "precision": 0.4612546125461255,
+      "recall": 0.382262996941896,
+      "f1": 0.4180602006688964,
+      "n": 464
+     }
+    },
+    "median_err_px_tp": 2.0724847351323916
+   },
+   "finetuned": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 79,
+      "fp": 7,
+      "fn": 24,
+      "precision": 0.9186046511627907,
+      "recall": 0.7669902912621359,
+      "f1": 0.835978835978836,
+      "n_visible": 103,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 50,
+      "fp": 1,
+      "fn": 59,
+      "precision": 0.9803921568627451,
+      "recall": 0.45871559633027525,
+      "f1": 0.625,
+      "n_visible": 109,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 11,
+      "fp": 0,
+      "fn": 85,
+      "precision": 1.0,
+      "recall": 0.11458333333333333,
+      "f1": 0.205607476635514,
+      "n_visible": 96,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 18,
+      "fp": 0,
+      "fn": 47,
+      "precision": 1.0,
+      "recall": 0.27692307692307694,
+      "f1": 0.4337349397590362,
+      "n_visible": 65,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null,
+      "n_visible": 0,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 150,
+      "fp": 9,
+      "fn": 118,
+      "precision": 0.9433962264150944,
+      "recall": 0.5597014925373134,
+      "f1": 0.702576112412178,
+      "n_visible": 268,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 308,
+      "fp": 17,
+      "fn": 333,
+      "precision": 0.9476923076923077,
+      "recall": 0.48049921996879874,
+      "f1": 0.6376811594202899,
+      "n_visible": 641,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4089-r3": {
+      "tp": 98,
+      "fp": 15,
+      "fn": 216,
+      "precision": 0.8672566371681416,
+      "recall": 0.31210191082802546,
+      "f1": 0.459016393442623,
+      "n": 465
+     },
+     "IMG_4091-r12": {
+      "tp": 210,
+      "fp": 2,
+      "fn": 117,
+      "precision": 0.9905660377358491,
+      "recall": 0.6422018348623854,
+      "f1": 0.7792207792207793,
+      "n": 464
+     }
+    },
+    "median_err_px_tp": 1.4426109623797019
+   }
+  },
+  "B": {
+   "baseline": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 80,
+      "fp": 11,
+      "fn": 50,
+      "precision": 0.8791208791208791,
+      "recall": 0.6153846153846154,
+      "f1": 0.7239819004524888,
+      "n_visible": 130,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 18,
+      "fp": 27,
+      "fn": 190,
+      "precision": 0.4,
+      "recall": 0.08653846153846154,
+      "f1": 0.14229249011857706,
+      "n_visible": 208,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 0,
+      "fp": 50,
+      "fn": 74,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_visible": 74,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 3,
+      "fp": 17,
+      "fn": 68,
+      "precision": 0.15,
+      "recall": 0.04225352112676056,
+      "f1": 0.06593406593406594,
+      "n_visible": 71,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 0,
+      "fp": 3,
+      "fn": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_visible": 1,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 66,
+      "fp": 200,
+      "fn": 142,
+      "precision": 0.24812030075187969,
+      "recall": 0.3173076923076923,
+      "f1": 0.2784810126582278,
+      "n_visible": 208,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 167,
+      "fp": 308,
+      "fn": 525,
+      "precision": 0.35157894736842105,
+      "recall": 0.24132947976878613,
+      "f1": 0.28620394173093405,
+      "n_visible": 692,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4089-r11": {
+      "tp": 67,
+      "fp": 133,
+      "fn": 241,
+      "precision": 0.335,
+      "recall": 0.21753246753246752,
+      "f1": 0.2637795275590551,
+      "n": 465
+     },
+     "IMG_4091-r16": {
+      "tp": 100,
+      "fp": 175,
+      "fn": 284,
+      "precision": 0.36363636363636365,
+      "recall": 0.2604166666666667,
+      "f1": 0.3034901365705615,
+      "n": 465
+     }
+    },
+    "median_err_px_tp": 2.51981815593888
+   },
+   "finetuned": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 107,
+      "fp": 6,
+      "fn": 23,
+      "precision": 0.9469026548672567,
+      "recall": 0.823076923076923,
+      "f1": 0.8806584362139918,
+      "n_visible": 130,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 111,
+      "fp": 5,
+      "fn": 97,
+      "precision": 0.9568965517241379,
+      "recall": 0.5336538461538461,
+      "f1": 0.6851851851851851,
+      "n_visible": 208,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 14,
+      "fp": 0,
+      "fn": 60,
+      "precision": 1.0,
+      "recall": 0.1891891891891892,
+      "f1": 0.3181818181818182,
+      "n_visible": 74,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 22,
+      "fp": 3,
+      "fn": 49,
+      "precision": 0.88,
+      "recall": 0.30985915492957744,
+      "f1": 0.45833333333333337,
+      "n_visible": 71,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "n_visible": 1,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 149,
+      "fp": 19,
+      "fn": 59,
+      "precision": 0.8869047619047619,
+      "recall": 0.7163461538461539,
+      "f1": 0.7925531914893618,
+      "n_visible": 208,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 404,
+      "fp": 33,
+      "fn": 288,
+      "precision": 0.9244851258581236,
+      "recall": 0.5838150289017341,
+      "f1": 0.7156775907883083,
+      "n_visible": 692,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4089-r11": {
+      "tp": 186,
+      "fp": 16,
+      "fn": 122,
+      "precision": 0.9207920792079208,
+      "recall": 0.6038961038961039,
+      "f1": 0.7294117647058824,
+      "n": 465
+     },
+     "IMG_4091-r16": {
+      "tp": 218,
+      "fp": 17,
+      "fn": 166,
+      "precision": 0.9276595744680851,
+      "recall": 0.5677083333333334,
+      "f1": 0.704361873990307,
+      "n": 465
+     }
+    },
+    "median_err_px_tp": 2.0111119824142207
+   }
+  },
+  "C": {
+   "baseline": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 80,
+      "fp": 12,
+      "fn": 40,
+      "precision": 0.8695652173913043,
+      "recall": 0.6666666666666666,
+      "f1": 0.7547169811320754,
+      "n_visible": 120,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 55,
+      "fp": 28,
+      "fn": 199,
+      "precision": 0.6626506024096386,
+      "recall": 0.21653543307086615,
+      "f1": 0.32640949554896137,
+      "n_visible": 254,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 0,
+      "fp": 78,
+      "fn": 68,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "n_visible": 68,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 2,
+      "fp": 33,
+      "fn": 15,
+      "precision": 0.05714285714285714,
+      "recall": 0.11764705882352941,
+      "f1": 0.07692307692307693,
+      "n_visible": 17,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "precision": 0.0,
+      "recall": null,
+      "f1": 0.0,
+      "n_visible": 0,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 54,
+      "fp": 149,
+      "fn": 203,
+      "precision": 0.2660098522167488,
+      "recall": 0.21011673151750973,
+      "f1": 0.23478260869565218,
+      "n_visible": 257,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 191,
+      "fp": 301,
+      "fn": 525,
+      "precision": 0.3882113821138211,
+      "recall": 0.26675977653631283,
+      "f1": 0.3162251655629139,
+      "n_visible": 716,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4090-r18": {
+      "tp": 113,
+      "fp": 140,
+      "fn": 249,
+      "precision": 0.44664031620553357,
+      "recall": 0.31215469613259667,
+      "f1": 0.367479674796748,
+      "n": 465
+     },
+     "IMG_4090-r9": {
+      "tp": 78,
+      "fp": 161,
+      "fn": 276,
+      "precision": 0.3263598326359833,
+      "recall": 0.22033898305084745,
+      "f1": 0.2630691399662732,
+      "n": 465
+     }
+    },
+    "median_err_px_tp": 2.3698372111168418
+   },
+   "finetuned": {
+    "tol7.5": [
+     {
+      "region": "front_wall",
+      "tp": 112,
+      "fp": 3,
+      "fn": 8,
+      "precision": 0.9739130434782609,
+      "recall": 0.9333333333333333,
+      "f1": 0.9531914893617022,
+      "n_visible": 120,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "side_walls",
+      "tp": 134,
+      "fp": 1,
+      "fn": 120,
+      "precision": 0.9925925925925926,
+      "recall": 0.5275590551181102,
+      "f1": 0.6889460154241644,
+      "n_visible": 254,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_back",
+      "tp": 8,
+      "fp": 0,
+      "fn": 60,
+      "precision": 1.0,
+      "recall": 0.11764705882352941,
+      "f1": 0.21052631578947367,
+      "n_visible": 68,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "floor_front",
+      "tp": 14,
+      "fp": 0,
+      "fn": 3,
+      "precision": 1.0,
+      "recall": 0.8235294117647058,
+      "f1": 0.9032258064516129,
+      "n_visible": 17,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "air",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "precision": null,
+      "recall": null,
+      "f1": null,
+      "n_visible": 0,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "door_strip",
+      "tp": 120,
+      "fp": 3,
+      "fn": 137,
+      "precision": 0.975609756097561,
+      "recall": 0.4669260700389105,
+      "f1": 0.631578947368421,
+      "n_visible": 257,
+      "n_occluded": 0,
+      "occ_recall": null
+     },
+     {
+      "region": "all",
+      "tp": 388,
+      "fp": 7,
+      "fn": 328,
+      "precision": 0.9822784810126582,
+      "recall": 0.5418994413407822,
+      "f1": 0.6984698469846985,
+      "n_visible": 716,
+      "n_occluded": 0,
+      "occ_recall": null
+     }
+    ],
+    "per_window": {
+     "IMG_4090-r18": {
+      "tp": 218,
+      "fp": 6,
+      "fn": 144,
+      "precision": 0.9732142857142857,
+      "recall": 0.6022099447513812,
+      "f1": 0.7440273037542662,
+      "n": 465
+     },
+     "IMG_4090-r9": {
+      "tp": 170,
+      "fp": 1,
+      "fn": 184,
+      "precision": 0.9941520467836257,
+      "recall": 0.480225988700565,
+      "f1": 0.6476190476190476,
+      "n": 465
+     }
+    },
+    "median_err_px_tp": 1.6078476479132395
+   }
+  }
+ }
+}
